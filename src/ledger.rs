@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use log::warn;
 use serde::Serialize;
+use std::ops::Deref;
 
 
 // UID combines sequence number and event type [file:1].
@@ -35,12 +36,24 @@ pub enum Src {
     Light{ light_name: String, grp: Option<String> },
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Hash)]
 pub enum SrcId {
     Mat(u16),
     Surf(u16),
     MatSurf(u16),
     Light(u16),
+}
+
+impl Deref for SrcId {
+    type Target = u16;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Mat(id)     => id,
+            Self::Surf(id)    => id,
+            Self::MatSurf(id) => id,
+            Self::Light(id)   => id,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -69,20 +82,20 @@ where
 {
     pub fn new() -> Self {
         Self {
-            grps: HashMap::new(),
-            src_map: HashMap::new(),
-            next_mat_id: 0,
-            next_surf_id: 0,
+            grps:            HashMap::new(),
+            src_map:         HashMap::new(),
+            next_mat_id:     0,
+            next_surf_id:    0,
             next_matsurf_id: u16::MAX(),
-            next_light_id: 0,
-            next: HashMap::new(),
-            count: HashMap::new(),
-            prev: HashMap::new(),
-            next_seq_id: 0,
+            next_light_id:   0,
+            next:            HashMap::new(),
+            count:           HashMap::new(),
+            prev:            HashMap::new(),
+            next_seq_id:     0,
         }
     }
     pub fn with_surf(&mut self, obj_name: String, grp: Option<String>) -> SrcId {
-        if let Some(grp_name) = grp {
+        let src_id = if let Some(grp_name) = grp {
 
             let src_id = match self.grps.get(&grp_name) {
                 Some(src_id) => src_id.clone(),
@@ -95,26 +108,148 @@ where
                 }
             };
 
-            match src_id {
-                SrcId::Surf(_) => { src_id.clone() },
-                SrcId::MatSurf(_) => { src_id.clone() },
-                SrcId::Mat(id) => {
-                    warn!("Repurposing id {} from material to mat/surf for group {}", id, grp_name);
-                    // Replace MatId with MatSurfId
-                    let matsurf_id = SrcId::MatSurf(id);
-                    self.grps.get_mut(&grp_name).unwrap().clone_frou(&matsurf_id);
-                    matsurf_id
+            let grp_src_id = match src_id {
+                SrcId::Surf(_) => { src_id },
+                SrcId::MatSurf(_) => { src_id },
+                SrcId::Mat(_) => {
+                    let matsurf_id = self.next_matsurf_id;
+                    self.next_matsurf_id -= 1;
+
+                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(MatSurf({}))", src_id, matsurf_id, src_id, matsurf_id);
+                    if let Some(mat_names) = self.src_map.remove(&SrcId::Mat(*src_id)) {
+                        self.src_map.insert(SrcId::Mat(matsurf_id), mat_names);
+                    } else {
+                        panic!("Material ID {} not found in src_map", *src_id);
+                    }
+
+                    SrcId::MatSurf(matsurf_id)
                 },
 SrcId::Light(_) => {
                     panic!("Group name {} already used for a light source", grp_name);
                 },
-            }
+            };
+
+            grp_src_id
         } else {
             let surf_id = SrcId::Surf(self.next_surf_id);
             self.next_surf_id += 1;
             surf_id
-        }
+        };
+
+        match self.src_map.get_mut(&SrcId::Surf(*src_id)) {
+            Some(value) => value.push(obj_name),
+            None => {
+                self.src_map.insert(SrcId::Surf(*src_id), vec![obj_name]);
+            }
+        };
+
+        src_id
     }
+
+    pub fn with_mat(&mut self, mat_name: String, grp: Option<String>) -> SrcId {
+        let src_id = if let Some(grp_name) = grp {
+
+            let src_id = match self.grps.get(&grp_name) {
+                Some(src_id) => src_id.clone(),
+                None => {
+                    // Create new MatId
+                    let surf_id = SrcId::Mat(self.next_surf_id);
+                    self.next_surf_id += 1;
+                    self.grps.insert(grp_name.clone(), surf_id.clone());
+                    surf_id
+                }
+            };
+
+            let grp_src_id = match src_id {
+                SrcId::Mat(_) => { src_id.clone() },
+                SrcId::MatSurf(_) => { src_id.clone() },
+                SrcId::Surf(_) => {
+                    let matsurf_id = self.next_matsurf_id;
+                    self.next_matsurf_id -= 1;
+
+                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(MatSurf({}))", src_id, matsurf_id, src_id, matsurf_id);
+                    if let Some(mat_names) = self.src_map.remove(&SrcId::Mat(*src_id)) {
+                        self.src_map.insert(SrcId::Mat(matsurf_id), mat_names);
+                    } else {
+                        panic!("Material ID {} not found in src_map", *src_id);
+                    }
+
+                    SrcId::MatSurf(matsurf_id)
+                },
+SrcId::Light(_) => {
+                    panic!("Group name {} already used for a light source", grp_name);
+                },
+            };
+            grp_src_id
+        } else {
+            let surf_id = SrcId::Mat(self.next_surf_id);
+            self.next_surf_id += 1;
+            surf_id
+        };
+
+
+        match self.src_map.get_mut(&SrcId::Mat(*src_id)) {
+            Some(value) => value.push(mat_name),
+            None => {
+                self.src_map.insert(SrcId::Mat(*src_id), vec![mat_name]);
+            }
+        };
+
+        src_id
+    }
+
+    pub fn with_matsurf(&mut self, obj_name: String, mat_name: String, grp: Option<String>) -> SrcId {
+        let src_id = if let Some(grp_name) = grp {
+
+            let src_id = match self.grps.get(&grp_name) {
+                Some(src_id) => src_id.clone(),
+                None => {
+                    // Create new MatId
+                    let surf_id = SrcId::MatSurf(self.next_surf_id);
+                    self.next_surf_id += 1;
+                    self.grps.insert(grp_name.clone(), surf_id.clone());
+                    surf_id
+                }
+            };
+
+            let grp_src_id = match src_id {
+                SrcId::Mat(_) => { src_id.clone() },
+                SrcId::MatSurf(_) => { src_id.clone() },
+                SrcId::Surf(_) => {
+                    let matsurf_id = self.next_matsurf_id;
+                    self.next_matsurf_id -= 1;
+
+                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(MatSurf({}))", src_id, matsurf_id, src_id, matsurf_id);
+                    if let Some(mat_names) = self.src_map.remove(&SrcId::Mat(*src_id)) {
+                        self.src_map.insert(SrcId::Mat(matsurf_id), mat_names);
+                    } else {
+                        panic!("Material ID {} not found in src_map", *src_id);
+                    }
+
+                    SrcId::MatSurf(matsurf_id)
+                },
+SrcId::Light(_) => {
+                    panic!("Group name {} already used for a light source", grp_name);
+                },
+            };
+            grp_src_id
+        } else {
+            let surf_id = SrcId::MatSurf(self.next_surf_id);
+            self.next_surf_id += 1;
+            surf_id
+        };
+
+        let matsurf_name = format!("{}::{}", mat_name, obj_name);
+        match self.src_map.get_mut(&SrcId::MatSurf(*src_id)) {
+            Some(value) => value.push(matsurf_name),
+            None => {
+                self.src_map.insert(SrcId::MatSurf(*src_id), vec![matsurf_name]);
+            }
+        };
+
+        src_id
+    }
+
     // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
     // happen unless the simulation scene is extremely complex
     pub fn insert(&mut self, prev_event: Option<Uid<T>>, event: T) -> Uid<T> {

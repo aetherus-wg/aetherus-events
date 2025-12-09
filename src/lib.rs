@@ -184,3 +184,16 @@ impl ScatterDir {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_test() {
+        let boundary = Cube::new(Point3::new(0.0,0.0,0.0), Point3::new(10.0,10.0,10.0));
+        let outvol = OutputVolume::new(boundary, [10, 10, 10], OutputParameter::Energy);
+        assert_eq!(outvol.voxel_volume(), 1.0);
+    }
+}
+
