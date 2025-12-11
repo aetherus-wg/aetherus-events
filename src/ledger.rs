@@ -36,6 +36,10 @@ pub enum Src {
     Light{ light_name: String, grp: Option<String> },
 }
 
+
+// NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
+// as some nuisances about grouping have not been resolved.
+
 #[derive(Eq, PartialEq, Clone, Debug, Serialize, Hash)]
 pub enum SrcId {
     Mat(u16),
@@ -48,6 +52,7 @@ impl Deref for SrcId {
     type Target = u16;
     fn deref(&self) -> &Self::Target {
         match self {
+            Self::None => panic!("Attempted to deref uninitialized SrcId"),
             Self::Mat(id)     => id,
             Self::Surf(id)    => id,
             Self::MatSurf(id) => id,
@@ -63,7 +68,6 @@ where
 {
     grps:            HashMap<String, SrcId>, // Key: Group name
     src_map:         HashMap<SrcId, Vec<String>>, // Value: Material name, object name, light name.
-    // NOTE: Keep mat/surf separated
 
     next_mat_id:     u16,
     next_surf_id:    u16,
@@ -94,6 +98,7 @@ where
             next_seq_id:     0,
         }
     }
+
     pub fn with_surf(&mut self, obj_name: String, grp: Option<String>) -> SrcId {
         let src_id = if let Some(grp_name) = grp {
 
@@ -115,7 +120,7 @@ where
                     let matsurf_id = self.next_matsurf_id;
                     self.next_matsurf_id -= 1;
 
-                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(MatSurf({}))", src_id, matsurf_id, src_id, matsurf_id);
+                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(Mat({}))", src_id, matsurf_id, src_id, matsurf_id);
                     if let Some(mat_names) = self.src_map.remove(&SrcId::Mat(*src_id)) {
                         self.src_map.insert(SrcId::Mat(matsurf_id), mat_names);
                     } else {
@@ -136,66 +141,32 @@ SrcId::Light(_) => {
             surf_id
         };
 
-        match self.src_map.get_mut(&SrcId::Surf(*src_id)) {
+        match self.src_map.get_mut(&src_id) {
             Some(value) => value.push(obj_name),
             None => {
-                self.src_map.insert(SrcId::Surf(*src_id), vec![obj_name]);
+                self.src_map.insert(src_id.clone(), vec![obj_name]);
             }
         };
 
         src_id
     }
 
-    pub fn with_mat(&mut self, mat_name: String, grp: Option<String>) -> SrcId {
-        let src_id = if let Some(grp_name) = grp {
+    // NOTE: Materials are not grouped, only objects are
+    // FIXME: Is `with_mat` necessary? Materials are always paird with surfaces, apart from
+    // boundary, which can also be considered a special case of a surface
+    pub fn with_mat(&mut self, mat_name: String) -> SrcId {
+        let mat_id = SrcId::Mat(self.next_surf_id);
+        self.next_surf_id += 1;
 
-            let src_id = match self.grps.get(&grp_name) {
-                Some(src_id) => src_id.clone(),
-                None => {
-                    // Create new MatId
-                    let surf_id = SrcId::Mat(self.next_surf_id);
-                    self.next_surf_id += 1;
-                    self.grps.insert(grp_name.clone(), surf_id.clone());
-                    surf_id
-                }
-            };
-
-            let grp_src_id = match src_id {
-                SrcId::Mat(_) => { src_id.clone() },
-                SrcId::MatSurf(_) => { src_id.clone() },
-                SrcId::Surf(_) => {
-                    let matsurf_id = self.next_matsurf_id;
-                    self.next_matsurf_id -= 1;
-
-                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(MatSurf({}))", src_id, matsurf_id, src_id, matsurf_id);
-                    if let Some(mat_names) = self.src_map.remove(&SrcId::Mat(*src_id)) {
-                        self.src_map.insert(SrcId::Mat(matsurf_id), mat_names);
-                    } else {
-                        panic!("Material ID {} not found in src_map", *src_id);
-                    }
-
-                    SrcId::MatSurf(matsurf_id)
-                },
-SrcId::Light(_) => {
-                    panic!("Group name {} already used for a light source", grp_name);
-                },
-            };
-            grp_src_id
-        } else {
-            let surf_id = SrcId::Mat(self.next_surf_id);
-            self.next_surf_id += 1;
-            surf_id
-        };
-
-
-        match self.src_map.get_mut(&SrcId::Mat(*src_id)) {
+        match self.src_map.get_mut(&mat_id) {
             Some(value) => value.push(mat_name),
             None => {
-                self.src_map.insert(SrcId::Mat(*src_id), vec![mat_name]);
+                self.src_map.insert(mat_id.clone(), vec![mat_name]);
             }
         };
 
-        src_id
+
+        mat_id
     }
 
     pub fn with_matsurf(&mut self, obj_name: String, mat_name: String, grp: Option<String>) -> SrcId {
@@ -213,18 +184,30 @@ SrcId::Light(_) => {
             };
 
             let grp_src_id = match src_id {
-                SrcId::Mat(_) => { src_id.clone() },
-                SrcId::MatSurf(_) => { src_id.clone() },
-                SrcId::Surf(_) => {
+                SrcId::MatSurf(_) => { src_id },
+                SrcId::Surf(_) | SrcId::Mat(_) => {
                     let matsurf_id = self.next_matsurf_id;
                     self.next_matsurf_id -= 1;
 
-                    warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(MatSurf({}))", src_id, matsurf_id, src_id, matsurf_id);
-                    if let Some(mat_names) = self.src_map.remove(&SrcId::Mat(*src_id)) {
-                        self.src_map.insert(SrcId::Mat(matsurf_id), mat_names);
-                    } else {
-                        panic!("Material ID {} not found in src_map", *src_id);
-                    }
+                    match src_id {
+                        SrcId::Surf(_) => {
+                            warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(Surf({}))", src_id, matsurf_id, src_id, matsurf_id);
+                            if let Some(surf_names) = self.src_map.remove(&src_id) {
+                                self.src_map.insert(SrcId::Surf(matsurf_id), surf_names);
+                            } else {
+                                panic!("Surface ID {} not found in src_map", *src_id);
+                            }
+                        },
+                        SrcId::Mat(_) => {
+                            warn!("Discarding {:?} and allocate MatSurf({}), moving Map({:?}) to Map(Mat({}))", src_id, matsurf_id, src_id, matsurf_id);
+                            if let Some(surf_names) = self.src_map.remove(&src_id) {
+                                self.src_map.insert(SrcId::Mat(matsurf_id), surf_names);
+                            } else {
+                                panic!("Surface ID {} not found in src_map", *src_id);
+                            }
+                        },
+                        _ => {},
+                    };
 
                     SrcId::MatSurf(matsurf_id)
                 },
@@ -239,11 +222,11 @@ SrcId::Light(_) => {
             surf_id
         };
 
-        let matsurf_name = format!("{}::{}", mat_name, obj_name);
-        match self.src_map.get_mut(&SrcId::MatSurf(*src_id)) {
+        let matsurf_name = format!("{}:{}", mat_name, obj_name);
+        match self.src_map.get_mut(&src_id) {
             Some(value) => value.push(matsurf_name),
             None => {
-                self.src_map.insert(SrcId::MatSurf(*src_id), vec![matsurf_name]);
+                self.src_map.insert(src_id.clone(), vec![matsurf_name]);
             }
         };
 
