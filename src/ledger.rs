@@ -1,25 +1,28 @@
 use std::collections::HashMap;
 use log::warn;
 use serde::Serialize;
-use std::ops::Deref;
+
+use crate::mcrt::SrcId;
+use crate::{EventId, RawEvent, Encode};
 
 
 // UID combines sequence number and event type [file:1].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
-pub struct Uid<T>
-where
-    T: crate::Event,
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct Uid
 {
     pub seq_no: u32,
-    pub event: T, // u32 Event
+    pub event:  u32, // u32 Event
 }
 
+impl std::fmt::Debug for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Uid(seq_no: {}, event: 0x{:08X})", self.seq_no, self.event)
+    }
+}
 
-impl<T> Uid<T>
-where
-    T: crate::Event,
+impl Uid
 {
-    pub fn new(seq_no: u32, event: T) -> Self {
+    pub fn new(seq_no: u32, event: u32) -> Self {
         Self { seq_no, event }
     }
 
@@ -28,43 +31,9 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Src {
-    Mat{ mat_name: String, grp: Option<String> },
-    Surf{ obj_name: String, grp: Option<String> },
-    MatSurf(String),
-    Light{ light_name: String, grp: Option<String> },
-}
-
-
-// NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
-// as some nuisances about grouping have not been resolved.
-
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Hash)]
-pub enum SrcId {
-    Mat(u16),
-    Surf(u16),
-    MatSurf(u16),
-    Light(u16),
-}
-
-impl Deref for SrcId {
-    type Target = u16;
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Self::None => panic!("Attempted to deref uninitialized SrcId"),
-            Self::Mat(id)     => id,
-            Self::Surf(id)    => id,
-            Self::MatSurf(id) => id,
-            Self::Light(id)   => id,
-        }
-    }
-}
 
 #[derive(Serialize)]
-pub struct Ledger<T>
-where
-    T: crate::Event,
+pub struct Ledger
 {
     grps:            HashMap<String, SrcId>, // Key: Group name
     src_map:         HashMap<SrcId, Vec<String>>, // Value: Material name, object name, light name.
@@ -74,15 +43,12 @@ where
     next_matsurf_id: u16,
     next_light_id:   u16,
 
-    next:            HashMap<Uid<T>, u32>,
-    count:           HashMap<Uid<T>, f64>,
+    next:            HashMap<Uid, u32>,
+    prev:            HashMap<u32, Uid>,
     next_seq_id:     u32,
-    prev:            HashMap<u32, Uid<T>>,
 }
 
-impl<T> Ledger<T>
-where
-    T: crate::Event,
+impl Ledger
 {
     pub fn new() -> Self {
         Self {
@@ -90,10 +56,9 @@ where
             src_map:         HashMap::new(),
             next_mat_id:     0,
             next_surf_id:    0,
-            next_matsurf_id: u16::MAX(),
+            next_matsurf_id: u16::MAX,
             next_light_id:   0,
             next:            HashMap::new(),
-            count:           HashMap::new(),
             prev:            HashMap::new(),
             next_seq_id:     0,
         }
@@ -155,8 +120,8 @@ SrcId::Light(_) => {
     // FIXME: Is `with_mat` necessary? Materials are always paird with surfaces, apart from
     // boundary, which can also be considered a special case of a surface
     pub fn with_mat(&mut self, mat_name: String) -> SrcId {
-        let mat_id = SrcId::Mat(self.next_surf_id);
-        self.next_surf_id += 1;
+        let mat_id = SrcId::Mat(self.next_mat_id);
+        self.next_mat_id += 1;
 
         match self.src_map.get_mut(&mat_id) {
             Some(value) => value.push(mat_name),
@@ -176,8 +141,8 @@ SrcId::Light(_) => {
                 Some(src_id) => src_id.clone(),
                 None => {
                     // Create new MatId
-                    let surf_id = SrcId::MatSurf(self.next_surf_id);
-                    self.next_surf_id += 1;
+                    let surf_id = SrcId::MatSurf(self.next_matsurf_id);
+                    self.next_matsurf_id -= 1;
                     self.grps.insert(grp_name.clone(), surf_id.clone());
                     surf_id
                 }
@@ -217,12 +182,12 @@ SrcId::Light(_) => {
             };
             grp_src_id
         } else {
-            let surf_id = SrcId::MatSurf(self.next_surf_id);
-            self.next_surf_id += 1;
+            let surf_id = SrcId::MatSurf(self.next_matsurf_id);
+            self.next_matsurf_id -= 1;
             surf_id
         };
 
-        let matsurf_name = format!("{}:{}", mat_name, obj_name);
+        let matsurf_name = format!("{}:{}", obj_name, mat_name);
         match self.src_map.get_mut(&src_id) {
             Some(value) => value.push(matsurf_name),
             None => {
@@ -235,7 +200,7 @@ SrcId::Light(_) => {
 
     // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
     // happen unless the simulation scene is extremely complex
-    pub fn insert(&mut self, prev_event: Option<Uid<T>>, event: T) -> Uid<T> {
+    pub fn insert(&mut self, prev_event: Option<Uid>, event: EventId) -> Uid {
         // 1. If prev_event is Some, i.e. not the first event in the pipeline, like an emission
         //    event, then we are looking for the seq_no to use
         // 2. Push a new entry in next with the new_event UID if it doesn't exist already and
@@ -252,38 +217,29 @@ SrcId::Light(_) => {
                 0
             };
 
-        let uid = Uid::new(new_event_seq_no, event);
+        let uid = Uid::new(new_event_seq_no, event.encode());
 
         if let Some(_event_next_seq_no) = self.next.get(&uid) {
-            *self.count.get_mut(&uid).unwrap() += 1.0;
+            //*self.count.get_mut(&uid).unwrap() += 1.0;
         } else {
             self.next.insert(uid.clone(), self.next_seq_id);
-            self.count.insert(uid.clone(), 1.0);
+            //self.count.insert(uid.clone(), 1.0);
             self.prev.insert(self.next_seq_id, uid.clone());
             self.next_seq_id += 1;
         }
         uid
     }
 
-    pub fn insert_weighted(
-        &mut self,
-        prev_event: Option<Uid<T>>,
-        event: T,
-        weight: f64,
-    ) -> Uid<T> {
-        let uid = self.insert(prev_event, event);
-        *self.count.get_mut(&uid).unwrap() += weight - 1.0;
-        uid
-    }
-    pub fn get_next(&self, uid: &Uid<T>) -> Option<u32> {
+    pub fn get_next(&self, uid: &Uid) -> Option<u32> {
         self.next.get(&uid).cloned()
     }
-    pub fn get_prev(&self, seq_no: u32) -> Option<Uid<T>> {
+    pub fn get_prev(&self, seq_no: u32) -> Option<Uid> {
         self.prev.get(&seq_no).cloned()
     }
 
-    pub fn get_chain(&self, last_uid: Uid<T>) -> Vec<Uid<T>> {
+    pub fn get_chain(&self, last_uid: Uid) -> Vec<Uid> {
         let mut chain = Vec::new();
+        chain.push(last_uid.clone());
         let mut seq_no = last_uid.seq_no;
         while let Some(uid) = self.get_prev(seq_no) {
             chain.push(uid.clone());
@@ -291,5 +247,89 @@ SrcId::Light(_) => {
         }
         chain.reverse();
         chain
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn produce_src_id() {
+        let surfs = vec![
+            "surf1".to_string(),
+            "surf2".to_string(),
+            "surf3".to_string(),
+        ];
+        let mats = vec![
+            "mat1".to_string(),
+            "mat2".to_string(),
+        ];
+
+        let objects = vec![
+            ("obj1".to_string(), "mat1".to_string()),
+            ("obj2".to_string(), "mat2".to_string()),
+            ("obj3".to_string(), "mat1".to_string()),
+        ];
+
+        let mut ledger = Ledger::new();
+
+        for mat in mats {
+            let src_id = ledger.with_mat(mat.clone());
+            assert!(ledger.src_map.contains_key(&src_id));
+            assert_eq!(ledger.src_map.get(&src_id).unwrap(), &vec![mat.clone()]);
+        }
+
+        for surf in surfs {
+            let src_id = ledger.with_surf(surf.clone(), None);
+            assert!(ledger.src_map.contains_key(&src_id));
+            assert_eq!(ledger.src_map.get(&src_id).unwrap(), &vec![surf.clone()]);
+        }
+
+        for (obj, mat) in objects {
+            let src_id = ledger.with_matsurf(obj.clone(), mat.clone(), None);
+            assert!(ledger.src_map.contains_key(&src_id));
+            let expected_name = format!("{}:{}", obj.clone(), mat.clone());
+            assert_eq!(ledger.src_map.get(&src_id).unwrap(), &vec![expected_name]);
+        }
+
+        // Inspect the ledger
+        println!("Ledger src_map: {:?}", ledger.src_map);
+    }
+
+    #[test]
+    fn insert_events() {
+        let mut ledger = Ledger::new();
+        let emission_event = EventId {
+            event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
+            src_id: 1,
+        };
+        let uid1 = ledger.insert(None, emission_event);
+        assert_eq!(uid1.seq_no, 0);
+        let mcrt_event = EventId {
+            event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, HenyeyGreenstein, Forward)),
+            src_id: 2,
+        };
+        let uid2 = ledger.insert(Some(uid1.clone()), mcrt_event);
+        assert_eq!(uid2.seq_no, 1);
+        let mcrt_event = EventId {
+            event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
+            src_id: 2,
+        };
+        let uid3 = ledger.insert(Some(uid2.clone()), mcrt_event);
+        assert_eq!(uid3.seq_no, 2);
+        // Check the chain
+        let chain = ledger.get_chain(uid3.clone());
+        println!("Chain: {:?}", chain);
+        println!("Chain: {:?}",
+            chain.iter()
+            .map(|uid|
+                format!("Uid(seq_no: {}, event: {:?})", uid.seq_no, uid.event.decode().event_type))
+            .collect::<Vec<String>>()
+        );
+        assert_eq!(chain.len(), 3);
+        assert_eq!(chain[0], uid1);
+        assert_eq!(chain[1], uid2);
+        assert_eq!(chain[2], uid3);
     }
 }

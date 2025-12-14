@@ -1,6 +1,67 @@
+use num_enum::{TryFromPrimitive, IntoPrimitive};
+use std::convert::TryFrom;
+use std::ops::Deref;
+use std::usize;
 
+pub trait RawField: Clone {
+    fn mask() -> u32;
+    fn shift() -> usize;
+    fn bitsize() -> usize;
+    fn decode(raw: u32) -> Self
+    where
+        Self: TryFrom<u8>,
+        <Self as TryFrom<u8>>::Error: std::fmt::Debug,
+    {
+        let value = ((raw & Self::mask()) >> Self::shift()) as u8;
+        Self::try_from(value).unwrap_or_else( |err| {
+            panic!("Failed to convert value: {:?}, error: {:?}", value, err);
+        })
+    }
+    fn encode(&self) -> u32
+    where
+        Self: Into<u8>,
+    {
+        let value = (<Self as Into<u8>>::into(self.clone()) as u32) << Self::shift();
+        debug_assert!(value & Self::mask() == value, "Encoded value exceeds field mask");
+        value
+    }
+    //fn decode_byte(raw: u32) -> Self
+    //where
+    //    Self: TryFrom<u8>,
+    //    <Self as TryFrom<u8>>::Error: std::fmt::Debug,
+    //{
+    //    if Self::shift() < 16 {
+    //        panic!("Only upper 2 bytes are encoded, no support for shift {}", Self::shift());
+    //    } else if Self::shift() < 24 {
+    //        let value = ((raw >> (Self::shift() - 16)) & 0xFF) as u8;
+    //        Self::try_from(value)
+    //            .unwrap_or_else( |err| {
+    //                panic!("Failed to convert value: {:?}, error: {:?}", value, err);
+    //        })
+    //    } else {
+    //        let value = ((raw >> (Self::shift() - 24)) & 0xFF) as u8;
+    //        Self::try_from(value)
+    //            .unwrap_or_else( |err| {
+    //                panic!("Failed to convert value: {:?}, error: {:?}", value, err);
+    //        })
+    //    }
+    //}
+    //fn encode_byte(&self) -> u8
+    //where
+    //    Self: Into<u8>,
+    //{
+    //    if Self::shift() < 16 {
+    //        panic!("Only upper 2 bytes are encoded, no support for shift {}", Self::shift());
+    //    } else if Self::shift() < 24 {
+    //        <Self as Into<u8>>::into(self.clone()) << (Self::shift() - 16)
+    //    } else {
+    //        <Self as Into<u8>>::into(self.clone()) << (Self::shift() - 24)
+    //    }
+    //}
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pipeline {
     Emission   = 1,
     Mcrt       = 3,
@@ -9,103 +70,107 @@ pub enum Pipeline {
     // Other codes are free to be used for custom pipeline stages
 }
 
-impl TryFrom<u8> for Pipeline {
-    type Error = &'static str;
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::Emission),
-            3 => Ok(Self::Mcrt),
-            5 => Ok(Self::Detection),
-            7 => Ok(Self::Processing),
-            _ => Err("Invalid Pipeline value"),
-        }
-    }
+impl RawField for Pipeline {
+    fn mask() -> u32 { 0x0f000000 }
+    fn shift() -> usize { 24 }
+    fn bitsize() -> usize { 4 }
 }
 
 // TODO: Perhaps should make it interop with u32, to allow for extension
 // Then new would return Result<Self> in order to raise error when id doesn't feet in the
 // underlying type
-trait MatSurfId {
-    fn new(id: u16) -> Self;
-    fn id(&self) -> u16;
+trait SrcIdDecode: Deref {
+    fn mask() -> u32 { 0x0000FFFF }
+    fn shift() -> usize { 0 }
+    fn bitsize() -> usize { 16 }
+    fn id(&self) -> u32;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MatId(u16);
-
-impl MatId {
-    pub fn new(id: u16) -> Self {
-        Self(id)
-    }
-    pub fn id(&self) -> u16 {
-        self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SurfId(u16);
-
-impl SurfId {
-    pub fn new(id: u16) -> Self {
-        Self(id)
-    }
-    pub fn id(&self) -> u16 {
-        self.0
-    }
-}
-
-// SuperType represents the 2-bit super type category [file:1].
+// SuperType represents the 2-bit super type category
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum McrtSuper {
+pub enum MCRT {
     Interface = 0,
     Reflector = 1,
     Material  = 2,
-    Custom    = 3,
+    //Custom    = 3,
 }
 
-// SubType for Interface events (6 bits, but simplified enum) [file:1].
+impl RawField for MCRT {
+    fn mask() -> u32 { 0x00c00000 }
+    fn shift() -> usize { 22 }
+    fn bitsize() -> usize { 2 }
+}
+
+// SubType for Interface events (6 bits, but simplified enum)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Interface {
     Reflection = 0,
     Refraction = 1,
-    // Custom 2-63
+    ReEmittance = 4,
+    // Custom 32-63
 }
 
-// SubType for Reflector events [file:1].
+impl RawField for Interface {
+    fn mask() -> u32 { 0x003f0000 }
+    fn shift() -> usize { 16 }
+    fn bitsize() -> usize { 6 }
+}
+
+// SubType for Reflector events
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Reflect {
+pub enum Reflector {
+    #[num_enum(alternatives = [3])]
     Diffuse         = 0b000010,  // 00001x
+    #[num_enum(alternatives = [5])]
     Specular        = 0b000100,  // 00010x
+    #[num_enum(alternatives = [7])]
     Composite       = 0b000110,  // 00011x
     RetroReflective = 0b001000,
     CompRetroRef    = 0b001001,
     // Custom others
 }
 
-// MaterialInteraction encodes the interaction type (2 bits) [file:1].
+impl RawField for Reflector {
+    fn mask() -> u32 { 0x003f0000 }
+    fn shift() -> usize { 16 }
+    fn bitsize() -> usize { 6 }
+}
+
+// MaterialInteraction encodes the interaction type (2 bits)
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Material {
     Absorption = 0b00,
     Inelastic  = 0b01,
     Elastic    = 0b10,
-    Custom     = 0b11,
 }
 
-// ScatterType for scattering events (2 bits) [file:1].
+impl RawField for Material {
+    fn mask() -> u32 { 0x00300000 }
+    fn shift() -> usize { 20 }
+    fn bitsize() -> usize { 2 }
+}
+
+// ScatterType for scattering events (2 bits)
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Inelastic {
     Raman        = 0b00,
     Fluorescence = 0b01,
 }
 
-// ScatterType for scattering events (2 bits) [file:1].
+impl RawField for Inelastic {
+    fn mask() -> u32 { 0x000c0000 }
+    fn shift() -> usize { 18 }
+    fn bitsize() -> usize { 2 }
+}
+
+// ScatterType for scattering events (2 bits)
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Elastic {
     HenyeyGreenstein = 0b00,
     Mie              = 0b01,
@@ -113,27 +178,127 @@ pub enum Elastic {
     SphericalCdf     = 0b11,
 }
 
-// Direction for scattering (2 bits) [file:1].
+impl RawField for Elastic {
+    fn mask() -> u32 { 0x000c0000 }
+    fn shift() -> usize { 18 }
+    fn bitsize() -> usize { 2 }
+}
+
+// Direction for scattering (2 bits)
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Direction {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
+pub enum ScatterDir {
     Any      = 0b00,
     Forward  = 0b01,
     Side     = 0b10,
     Backward = 0b11,
 }
 
-// EventType trait for all event types [file:1].
-pub trait EventType {
-    fn from_raw(raw: u32) -> Self where Self: Sized; // Decodes from 32-bit format
-    fn to_raw(&self) -> u32; // Encodes to 32-bit format
+impl RawField for ScatterDir {
+    fn mask() -> u32 { 0x00030000 }
+    fn shift() -> usize { 16 }
+    fn bitsize() -> usize { 2 }
 }
 
-// MCEvent represents the 32-bit MCRT event encoding [file:1].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct McrtEvent<MSId: MatSurfId> {
-    pub pipeline:   Pipeline,
-    pub event_type: u8,
-    pub inter_id:   MSId,
-}
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mie_encoding() {
+        let scatter_dir = Elastic::Mie;
+        let encoded = scatter_dir.encode();
+        assert_eq!(encoded & Elastic::mask(), encoded);
+        let decoded = Elastic::decode(encoded);
+        assert_eq!(decoded, scatter_dir);
+    }
+
+    #[test]
+    fn mie_explicit() {
+        let raw_event: u32 = 0x03a40001; // Pipeline: MCRT (3), MCRT Type: Material (2), Material Type: Elastic (0), Elastic Type: Mie (1), SrcId: 1
+        let decoded_elastic = Elastic::decode(raw_event);
+        assert_eq!(decoded_elastic, Elastic::Mie);
+    }
+
+    #[test]
+    fn elastic_encoding() {
+        let dec_list = vec![Elastic::HenyeyGreenstein, Elastic::Mie, Elastic::Rayleigh, Elastic::SphericalCdf];
+        let enc_list = vec![0x00000000, 0x00040000, 0x00080000, 0x000c0000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(Elastic::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn inelastic_encoding() {
+        let dec_list = vec![Inelastic::Raman, Inelastic::Fluorescence];
+        let enc_list = vec![0x00000000, 0x00040000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(Inelastic::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn scatter_dir_encoding() {
+        let dec_list = vec![ScatterDir::Any, ScatterDir::Forward, ScatterDir::Side, ScatterDir::Backward];
+        let enc_list = vec![0x00000000, 0x00010000, 0x00020000, 0x00030000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(ScatterDir::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn material_encoding() {
+        let dec_list = vec![Material::Absorption, Material::Inelastic, Material::Elastic];
+        let enc_list = vec![0x00000000, 0x00100000, 0x00200000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(Material::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn mcrt_encoding() {
+        let dec_list = vec![MCRT::Interface, MCRT::Reflector, MCRT::Material];
+        let enc_list = vec![0x00000000, 0x00400000, 0x00800000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(MCRT::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn interface_encoding() {
+        let dec_list = vec![Interface::Reflection, Interface::Refraction, Interface::ReEmittance];
+        let enc_list = vec![0x00000000, 0x00010000, 0x00040000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(Interface::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn reflector_encoding() {
+        let dec_list = vec![Reflector::Diffuse, Reflector::Specular, Reflector::Composite, Reflector::RetroReflective, Reflector::CompRetroRef];
+        let enc_list = vec![0x00020000, 0x00040000, 0x00060000, 0x00080000, 0x00090000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(Reflector::decode(*enc), dec);
+        }
+    }
+
+    #[test]
+    fn pipeline_encoding() {
+        let dec_list = vec![Pipeline::Emission, Pipeline::Mcrt, Pipeline::Detection, Pipeline::Processing];
+        let enc_list = vec![0x01000000, 0x03000000, 0x05000000, 0x07000000];
+        for (enc, dec) in enc_list.iter().zip(dec_list) {
+            assert_eq!(*enc, dec.encode());
+            assert_eq!(Pipeline::decode(*enc), dec);
+        }
+    }
+}
