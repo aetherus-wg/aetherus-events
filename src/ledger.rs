@@ -203,35 +203,39 @@ SrcId::Light(_) => {
         src_id
     }
 
-    // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
-    // happen unless the simulation scene is extremely complex
-    pub fn insert(&mut self, prev_event: Option<Uid>, event: EventId) -> Uid {
-        // 1. If prev_event is Some, i.e. not the first event in the pipeline, like an emission
-        //    event, then we are looking for the seq_no to use
-        // 2. Push a new entry in next with the new_event UID if it doesn't exist already and
-        //    set count to 1
-        // 2b. Otherwise, increment count
-        // Obs: seq_id=0 is reserved for root identification, hence all new events with no
-        // previous cause start with seq_no=0
-        let new_event_seq_no =
-            if let Some(prev_event) = prev_event {
-                let next_seq = self.next.get(&prev_event);
-                *next_seq.ok_or("Previous event not found in ledger").unwrap()
-            } else {
-                self.next_seq_id += 1;
-                0
-            };
+    pub fn insert_start(&mut self, start_event: EventId) -> Uid {
+        let uid = Uid::new(0, start_event.encode());
 
-        let uid = Uid::new(new_event_seq_no, event.encode());
-
-        if let Some(_event_next_seq_no) = self.next.get(&uid) {
-            //*self.count.get_mut(&uid).unwrap() += 1.0;
-        } else {
+        if self.next_seq_id == 0 {
+            self.next_seq_id += 1;
+        }
+        if None == self.next.get(&uid) {
             self.next.insert(uid.clone(), self.next_seq_id);
-            //self.count.insert(uid.clone(), 1.0);
             self.prev.insert(self.next_seq_id, uid.clone());
             self.next_seq_id += 1;
         }
+
+        uid
+    }
+
+    // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
+    // happen unless the simulation scene is extremely complex
+    pub fn insert(&mut self, prev_event: Uid, event: EventId) -> Uid {
+        // Push a new entry in next with the new_event UID if it doesn't exist already and
+        //    set count to 1
+        // Obs: seq_id=0 is reserved for root identification, hence all new events with no
+        // previous cause start with seq_no=0
+        let next_seq = self.next.get(&prev_event);
+        let new_event_seq_no = *next_seq.ok_or("Previous event not found in ledger").unwrap();
+
+        let uid = Uid::new(new_event_seq_no, event.encode());
+
+        if None == self.next.get(&uid) {
+            self.next.insert(uid.clone(), self.next_seq_id);
+            self.prev.insert(self.next_seq_id, uid.clone());
+            self.next_seq_id += 1;
+        }
+
         uid
     }
 
@@ -318,19 +322,19 @@ mod tests {
             event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
             src_id: 1,
         };
-        let uid1 = ledger.insert(None, emission_event);
+        let uid1 = ledger.insert_start(emission_event);
         assert_eq!(uid1.seq_no, 0);
         let mcrt_event = EventId {
             event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, HenyeyGreenstein, Forward)),
             src_id: 2,
         };
-        let uid2 = ledger.insert(Some(uid1.clone()), mcrt_event);
+        let uid2 = ledger.insert(uid1.clone(), mcrt_event);
         assert_eq!(uid2.seq_no, 1);
         let mcrt_event = EventId {
             event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
             src_id: 2,
         };
-        let uid3 = ledger.insert(Some(uid2.clone()), mcrt_event);
+        let uid3 = ledger.insert(uid2.clone(), mcrt_event);
         assert_eq!(uid3.seq_no, 2);
         // Check the chain
         let chain = ledger.get_chain(uid3.clone());
