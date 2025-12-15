@@ -4,6 +4,8 @@ use serde::Serialize;
 
 use crate::mcrt::SrcId;
 use crate::{EventId, RawEvent, Encode};
+use serde_json;
+use std::{fs::File, io::Write};
 
 
 // UID combines sequence number and event type [file:1].
@@ -51,6 +53,17 @@ pub struct Ledger
     next:            HashMap<Uid, u32>,
     prev:            HashMap<u32, Uid>,
     next_seq_id:     u32,
+}
+
+fn write_ledger_to_json(ledger: &Ledger, file_path: &str) -> Result<(), serde_json::Error> {
+    // Serialize the Ledger to a JSON string
+    let json = serde_json::to_string_pretty(ledger)?;
+
+    // Write the JSON string to a file
+    let mut file = File::create(file_path).expect("Unable to create file");
+    file.write_all(json.as_bytes()).expect("Unable to write data");
+
+    Ok(())
 }
 
 impl Ledger
