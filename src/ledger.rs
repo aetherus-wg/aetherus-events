@@ -20,6 +20,12 @@ impl std::fmt::Debug for Uid {
     }
 }
 
+impl std::fmt::Display for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:08X}{:08X})", self.seq_no, self.event)
+    }
+}
+
 impl Uid
 {
     pub fn new(seq_no: u32, event: u32) -> Self {
