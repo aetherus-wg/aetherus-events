@@ -113,6 +113,8 @@ SrcId::Light(_) => {
             }
         };
 
+        self.check_ids();
+
         src_id
     }
 
@@ -130,6 +132,7 @@ SrcId::Light(_) => {
             }
         };
 
+        self.check_ids();
 
         mat_id
     }
@@ -195,6 +198,8 @@ SrcId::Light(_) => {
             }
         };
 
+        self.check_ids();
+
         src_id
     }
 
@@ -247,6 +252,15 @@ SrcId::Light(_) => {
         }
         chain.reverse();
         chain
+    }
+
+    fn check_ids(&self) {
+        if self.next_mat_id >= self.next_matsurf_id {
+            warn!("Material ID and Material-Surface ID ranges are overlapping");
+        }
+        if self.next_surf_id >= self.next_matsurf_id {
+            warn!("Surface ID and Material-Surface ID ranges are overlapping");
+        }
     }
 }
 
