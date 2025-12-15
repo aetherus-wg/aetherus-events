@@ -55,7 +55,7 @@ pub struct Ledger
     next_seq_id:     u32,
 }
 
-fn write_ledger_to_json(ledger: &Ledger, file_path: &str) -> Result<(), serde_json::Error> {
+pub fn write_ledger_to_json(ledger: &Ledger, file_path: &str) -> Result<(), serde_json::Error> {
     // Serialize the Ledger to a JSON string
     let json = serde_json::to_string_pretty(ledger)?;
 
