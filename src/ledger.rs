@@ -10,10 +10,11 @@ use serde_json;
 use std::fs::File;
 
 use std::hash::{Hash, Hasher};
+use std::collections::BTreeMap;
 
 
 // UID combines sequence number and event type [file:1].
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Uid
 {
     pub seq_no: u32,
@@ -84,9 +85,9 @@ pub struct Ledger
     next_matsurf_id: u16,
     next_light_id:   u16,
 
-    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
-    next:            HashMap<Uid, u32>,
-    prev:            HashMap<u32, Uid>,
+    #[serde_as(as = "BTreeMap<DisplayFromStr, _>")]
+    next:            BTreeMap<Uid, u32>,
+    prev:            BTreeMap<u32, Uid>,
     next_seq_id:     u32,
 }
 
@@ -106,8 +107,8 @@ impl Ledger
             next_surf_id:    0,
             next_matsurf_id: u16::MAX,
             next_light_id:   0,
-            next:            HashMap::new(),
-            prev:            HashMap::new(),
+            next:            BTreeMap::new(),
+            prev:            BTreeMap::new(),
             next_seq_id:     0,
         }
     }
@@ -315,11 +316,11 @@ SrcId::Light(_) => {
         }
     }
 
-    fn get_next_map(&self) -> &HashMap<Uid, u32> {
+    fn get_next_map(&self) -> &BTreeMap<Uid, u32> {
         &self.next
     }
 
-    fn get_prev_map(&self) -> &HashMap<u32, Uid> {
+    fn get_prev_map(&self) -> &BTreeMap<u32, Uid> {
         &self.prev
     }
 
