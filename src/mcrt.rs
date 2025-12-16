@@ -1,17 +1,28 @@
 use crate::raw::{self, RawField};
 use crate::{Encode, Decode};
 use std::ops::Deref;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 // NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
 // as some nuisances about grouping have not been resolved.
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Hash)]
+#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize, Hash)]
 pub enum SrcId {
     Mat(u16),
     Surf(u16),
     MatSurf(u16),
     Light(u16),
+}
+
+impl std::fmt::Display for SrcId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SrcId::Mat(id)     => write!(f, "Mat({})", id),
+            SrcId::Surf(id)    => write!(f, "Surf({})", id),
+            SrcId::MatSurf(id) => write!(f, "MatSurf({})", id),
+            SrcId::Light(id)   => write!(f, "Light({})", id),
+        }
+    }
 }
 
 impl RawField for SrcId {

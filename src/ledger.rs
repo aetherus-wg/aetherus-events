@@ -1,19 +1,29 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use log::warn;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use serde_with::{serde_as, DisplayFromStr};
 
 use crate::mcrt::SrcId;
 use crate::{EventId, RawEvent, Encode};
 use serde_json;
-use std::{fs::File, io::Write};
+use std::fs::File;
+
+use std::hash::{Hash, Hasher};
 
 
 // UID combines sequence number and event type [file:1].
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Uid
 {
     pub seq_no: u32,
     pub event:  u32, // u32 Event
+}
+
+impl Hash for Uid {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.encode().hash(state);
+    }
 }
 
 impl std::fmt::Debug for Uid {
@@ -24,7 +34,23 @@ impl std::fmt::Debug for Uid {
 
 impl std::fmt::Display for Uid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0x{:08X}{:08X})", self.seq_no, self.event)
+        write!(f, "0x{:08X}_{:08X}", self.seq_no, self.event)
+    }
+}
+
+impl FromStr for Uid {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim_start_matches("0x");
+        if s.len() != 17 {
+            return Err(format!("Invalid Uid string length: {}", s.len()));
+        }
+        let seq_no = u32::from_str_radix(&s[0..8], 16)
+            .map_err(|e| format!("Failed to parse seq_no: {}", e))?;
+        assert_eq!(&s[8..9], "_", "Invalid Uid format, expected '_' at position 8");
+        let event = u32::from_str_radix(&s[9..17], 16)
+            .map_err(|e| format!("Failed to parse event: {}", e))?;
+        Ok(Uid { seq_no, event })
     }
 }
 
@@ -37,12 +63,20 @@ impl Uid
     pub fn encode(&self) -> u64 {
         ((self.seq_no as u64) << 32) | (self.event.raw() as u64)
     }
+
+    pub fn decode(encoded: u64) -> Self {
+        let event_raw = (encoded >> 32) as u32;
+        let seq_no = (encoded & 0xFFFFFFFF) as u32;
+        Self { seq_no, event: event_raw }
+    }
 }
 
+#[serde_as]
 #[derive(Serialize)]
 pub struct Ledger
 {
     grps:            HashMap<String, SrcId>, // Key: Group name
+    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     src_map:         HashMap<SrcId, Vec<String>>, // Value: Material name, object name, light name.
 
     next_mat_id:     u16,
@@ -50,20 +84,16 @@ pub struct Ledger
     next_matsurf_id: u16,
     next_light_id:   u16,
 
+    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     next:            HashMap<Uid, u32>,
     prev:            HashMap<u32, Uid>,
     next_seq_id:     u32,
 }
 
 pub fn write_ledger_to_json(ledger: &Ledger, file_path: &str) -> Result<(), serde_json::Error> {
-    // Serialize the Ledger to a JSON string
-    let json = serde_json::to_string_pretty(ledger)?;
-
     // Write the JSON string to a file
-    let mut file = File::create(file_path).expect("Unable to create file");
-    file.write_all(json.as_bytes()).expect("Unable to write data");
-
-    Ok(())
+    let file = File::create(file_path).expect("Unable to create file");
+    serde_json::to_writer_pretty(file, ledger)
 }
 
 impl Ledger
@@ -301,6 +331,8 @@ SrcId::Light(_) => {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
+    use std::path::Path;
 
     #[test]
     fn produce_src_id() {
@@ -379,5 +411,50 @@ mod tests {
         assert_eq!(chain[0], uid1);
         assert_eq!(chain[1], uid2);
         assert_eq!(chain[2], uid3);
+    }
+
+    #[test]
+    fn write_ledger_json() {
+        let mut ledger = Ledger::new();
+        let surf_src_id = ledger.with_surf("surface1".to_string(), Some("group1".to_string()));
+        let mat_src_id = ledger.with_mat("material1".to_string());
+        // TODO: Complete the entire implementation to test the json writer
+        let emission_event = EventId {
+            event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
+            src_id: 1,
+        };
+        let uid1 = ledger.insert_start(emission_event);
+
+        let mcrt_event = EventId {
+            event_type: crate::EventType::MCRT(crate::mcrt_event!(Interface, Refraction)),
+            src_id: *surf_src_id,
+        };
+        let uid2 = ledger.insert(uid1.clone(), mcrt_event);
+
+        assert_eq!(uid2.seq_no, 1);
+        let mcrt_event = EventId {
+            event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
+            src_id: *mat_src_id,
+        };
+        let uid3 = ledger.insert(uid2.clone(), mcrt_event);
+
+        let chain = ledger.get_chain(uid3.clone());
+        println!("Chain: {:?}",
+            chain.iter()
+            .map(|uid|
+                format!("Uid(seq_no: {}, event: {:?})", uid.seq_no, uid.event.decode().event_type))
+            .collect::<Vec<String>>()
+        );
+
+        // Create a temporary directory
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_file_path = temp_dir.path().join("test_ledger.json");
+        println!("Temporary file path: {:?}", temp_file_path);
+        write_ledger_to_json(&ledger, temp_file_path.to_str().unwrap())
+            .expect("Failed to save ledger to JSON.");
+
+        // Keep the temporary directory for inspection
+        let _persisted_dir = temp_dir.keep();
+        println!("Temporary directory persisted at: {}", _persisted_dir.display());
     }
 }
