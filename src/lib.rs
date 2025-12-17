@@ -69,6 +69,7 @@ impl Decode for EventId {
         let event_type = match pipeline {
             raw::Pipeline::Mcrt => EventType::MCRT(mcrt::MCRT::decode(raw)),
             raw::Pipeline::Emission => EventType::Emission(emission::Emission::decode(raw)),
+            raw::Pipeline::Detection => EventType::Detection,
             _ => panic!("Cannot decode {:?} pipeline event", pipeline),
         };
         let src_id = (raw & 0xFFFF) as u16;
@@ -84,6 +85,7 @@ impl Encode for EventId {
         let event_type_code = match &self.event_type {
             EventType::MCRT(mcrt_event) => raw::Pipeline::Mcrt.encode() | mcrt_event.encode(),
             EventType::Emission(emission) => raw::Pipeline::Emission.encode() | emission.encode(),
+            EventType::Detection => raw::Pipeline::Detection.encode(),
             _ => panic!("Cannot encode event type as MCRT event"),
         };
         event_type_code | (self.src_id as u32)
