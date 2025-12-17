@@ -19,7 +19,14 @@ struct UID {
 
 The following specification focuses mostly on how to encode the `EventType`, but also gives a usage example below.
 
-![Simulation Event Types Encoding Space Segmentation](docs/imgs/McrtEventsCodingScheme.png)
+![Simulation Event Types Encoding Space Segmentation](./docs/imgs/McrtEventsCodingScheme.png)
+
+## TODO
+
+- [ ] Filtering framework to develop, such that various sequences can be identified and various end UIDs are returned
+- [ ] Ledger insert needs to be thought with multithreading in mind, spawning a worker which accepts requests and returns *Futures*, such that threads are not being held up unnecessary
+
+![Ledger Inserter UidFuture](./docs/imgs/AetherusUidLedger_insert_Future.excalidraw.png)
 
 ## Encoding Scheme
 
