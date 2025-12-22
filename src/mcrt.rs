@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 // NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
 // as some nuisances about grouping have not been resolved.
 
-#[derive(Eq, PartialEq, Clone, Debug, Serialize, Deserialize, Hash)]
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
 pub enum SrcId {
     None,
     Mat(u16),
