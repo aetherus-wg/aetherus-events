@@ -407,10 +407,6 @@ impl Ledger {
         // Then we should encapsulate this section to run it atomically, then the Ledger can
         // implement Send + Sync traits safely without Arc<Mutex>
         if self.insert_entry(uid.clone(), self.next_seq_id) {
-            println!(
-                "Inserted UID: {:?}, incrementing seq_id: {}",
-                uid, self.next_seq_id
-            );
             self.next_seq_id += 1;
         }
 
