@@ -25,65 +25,22 @@ pub trait RawField: Clone {
         debug_assert!(value & Self::mask() == value, "Encoded value exceeds field mask");
         value
     }
-    //fn decode_byte(raw: u32) -> Self
-    //where
-    //    Self: TryFrom<u8>,
-    //    <Self as TryFrom<u8>>::Error: std::fmt::Debug,
-    //{
-    //    if Self::shift() < 16 {
-    //        panic!("Only upper 2 bytes are encoded, no support for shift {}", Self::shift());
-    //    } else if Self::shift() < 24 {
-    //        let value = ((raw >> (Self::shift() - 16)) & 0xFF) as u8;
-    //        Self::try_from(value)
-    //            .unwrap_or_else( |err| {
-    //                panic!("Failed to convert value: {:?}, error: {:?}", value, err);
-    //        })
-    //    } else {
-    //        let value = ((raw >> (Self::shift() - 24)) & 0xFF) as u8;
-    //        Self::try_from(value)
-    //            .unwrap_or_else( |err| {
-    //                panic!("Failed to convert value: {:?}, error: {:?}", value, err);
-    //        })
-    //    }
-    //}
-    //fn encode_byte(&self) -> u8
-    //where
-    //    Self: Into<u8>,
-    //{
-    //    if Self::shift() < 16 {
-    //        panic!("Only upper 2 bytes are encoded, no support for shift {}", Self::shift());
-    //    } else if Self::shift() < 24 {
-    //        <Self as Into<u8>>::into(self.clone()) << (Self::shift() - 16)
-    //    } else {
-    //        <Self as Into<u8>>::into(self.clone()) << (Self::shift() - 24)
-    //    }
-    //}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum Pipeline {
     Emission   = 1,
-    Mcrt       = 3,
+    MCRT       = 3,
     Detection  = 5,
     Processing = 7,
     // Other codes are free to be used for custom pipeline stages
 }
 
 impl RawField for Pipeline {
-    fn mask() -> u32 { 0x0f000000 }
+    fn mask() -> u32 { 0x0F000000 }
     fn shift() -> usize { 24 }
     fn bitsize() -> usize { 4 }
-}
-
-// TODO: Perhaps should make it interop with u32, to allow for extension
-// Then new would return Result<Self> in order to raise error when id doesn't feet in the
-// underlying type
-trait SrcIdDecode: Deref {
-    fn mask() -> u32 { 0x0000FFFF }
-    fn shift() -> usize { 0 }
-    fn bitsize() -> usize { 16 }
-    fn id(&self) -> u32;
 }
 
 // SuperType represents the 2-bit super type category
@@ -97,7 +54,7 @@ pub enum MCRT {
 }
 
 impl RawField for MCRT {
-    fn mask() -> u32 { 0x00c00000 }
+    fn mask() -> u32 { 0x00C00000 }
     fn shift() -> usize { 22 }
     fn bitsize() -> usize { 2 }
 }
@@ -113,7 +70,7 @@ pub enum Interface {
 }
 
 impl RawField for Interface {
-    fn mask() -> u32 { 0x003f0000 }
+    fn mask() -> u32 { 0x003F0000 }
     fn shift() -> usize { 16 }
     fn bitsize() -> usize { 6 }
 }
@@ -134,7 +91,7 @@ pub enum Reflector {
 }
 
 impl RawField for Reflector {
-    fn mask() -> u32 { 0x003f0000 }
+    fn mask() -> u32 { 0x003F0000 }
     fn shift() -> usize { 16 }
     fn bitsize() -> usize { 6 }
 }
@@ -163,7 +120,7 @@ pub enum Inelastic {
 }
 
 impl RawField for Inelastic {
-    fn mask() -> u32 { 0x000c0000 }
+    fn mask() -> u32 { 0x000C0000 }
     fn shift() -> usize { 18 }
     fn bitsize() -> usize { 2 }
 }
@@ -179,7 +136,7 @@ pub enum Elastic {
 }
 
 impl RawField for Elastic {
-    fn mask() -> u32 { 0x000c0000 }
+    fn mask() -> u32 { 0x000C0000 }
     fn shift() -> usize { 18 }
     fn bitsize() -> usize { 2 }
 }
@@ -225,7 +182,7 @@ mod tests {
     #[test]
     fn elastic_encoding() {
         let dec_list = vec![Elastic::HenyeyGreenstein, Elastic::Mie, Elastic::Rayleigh, Elastic::SphericalCdf];
-        let enc_list = vec![0x00000000, 0x00040000, 0x00080000, 0x000c0000];
+        let enc_list = vec![0x00000000, 0x00040000, 0x00080000, 0x000C0000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Elastic::decode(*enc), dec);
@@ -294,7 +251,7 @@ mod tests {
 
     #[test]
     fn pipeline_encoding() {
-        let dec_list = vec![Pipeline::Emission, Pipeline::Mcrt, Pipeline::Detection, Pipeline::Processing];
+        let dec_list = vec![Pipeline::Emission, Pipeline::MCRT, Pipeline::Detection, Pipeline::Processing];
         let enc_list = vec![0x01000000, 0x03000000, 0x05000000, 0x07000000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());

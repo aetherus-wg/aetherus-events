@@ -89,7 +89,7 @@ impl Decode for EventId {
     fn decode(raw: u32) -> Self {
         let pipeline = raw::Pipeline::decode(raw);
         let event_type = match pipeline {
-            raw::Pipeline::Mcrt => EventType::MCRT(mcrt::MCRT::decode(raw)),
+            raw::Pipeline::MCRT => EventType::MCRT(mcrt::MCRT::decode(raw)),
             raw::Pipeline::Emission => EventType::Emission(emission::Emission::decode(raw)),
             raw::Pipeline::Detection => EventType::Detection,
             _ => panic!("Cannot decode {:?} pipeline event", pipeline),
@@ -105,7 +105,8 @@ impl Decode for EventId {
 impl Encode for EventId {
     fn encode(&self) -> u32 {
         let event_type_code = match &self.event_type {
-            EventType::MCRT(mcrt_event) => raw::Pipeline::Mcrt.encode() | mcrt_event.encode(),
+            EventType::None => panic!("Cannot encode None event type"),
+            EventType::MCRT(mcrt_event) => raw::Pipeline::MCRT.encode() | mcrt_event.encode(),
             EventType::Emission(emission) => raw::Pipeline::Emission.encode() | emission.encode(),
             EventType::Detection => raw::Pipeline::Detection.encode(),
             _ => panic!("Cannot encode event type as MCRT event"),
