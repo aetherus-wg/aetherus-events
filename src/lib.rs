@@ -30,7 +30,7 @@ pub trait RawEvent: std::hash::Hash + Clone + Eq + std::fmt::Debug + serde::Seri
 // =======================================
 // Top level Event Type encoding and decoding
 // =======================================
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum EventType {
     None,
     Emission(emission::Emission),
