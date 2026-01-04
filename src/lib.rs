@@ -6,6 +6,8 @@ pub mod ledger;
 
 use raw::{Pipeline, RawField};
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
+use log::warn;
 
 // =======================================
 // Traits for encoding and decoding events
@@ -30,6 +32,7 @@ pub trait RawEvent: std::hash::Hash + Clone + Eq + std::fmt::Debug + serde::Seri
 // =======================================
 #[derive(Debug)]
 pub enum EventType {
+    None,
     Emission(emission::Emission),
     MCRT(mcrt::MCRT),
     Detection,
@@ -60,6 +63,76 @@ impl ToString for SrcName {
             SrcName::MatSurf(name) => name.clone(),
             SrcName::Mat(name) => name.clone(),
             SrcName::Detector(name) => name.clone(),
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
+pub enum SrcId {
+    None,
+    Mat(u16),
+    Surf(u16),
+    MatSurf(u16),
+    Light(u16),
+}
+
+impl std::fmt::Display for SrcId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SrcId::None        => write!(f, "None"),
+            SrcId::Mat(id)     => write!(f, "Mat({})", id),
+            SrcId::Surf(id)    => write!(f, "Surf({})", id),
+            SrcId::MatSurf(id) => write!(f, "MatSurf({})", id),
+            SrcId::Light(id)   => write!(f, "Light({})", id),
+        }
+    }
+}
+
+impl RawField for SrcId {
+    fn mask() -> u32 { 0x0000FFFF }
+    fn shift() -> usize { 0 }
+    fn bitsize() -> usize { 16 }
+    fn decode(raw: u32) -> Self {
+        let id = (raw & Self::mask()) as u16;
+        match Pipeline::decode(raw) {
+            Pipeline::Emission => SrcId::Light(id),
+            Pipeline::MCRT     => {
+                match raw::MCRT::decode(raw) {
+                    raw::MCRT::Interface => SrcId::MatSurf(id),
+                    raw::MCRT::Reflector => SrcId::Surf(id),
+                    raw::MCRT::Material  => SrcId::Mat(id),
+                }
+            },
+            Pipeline::Detection  => {
+                warn!("Detection pipeline does not have SrcId associated.");
+                SrcId::None
+            },
+            Pipeline::Processing => {
+                warn!("Processing pipeline does not have SrcId associated.");
+                SrcId::None
+            },
+        }
+    }
+    fn encode(&self) -> u32 {
+        match self {
+            SrcId::None        => 0u32,
+            SrcId::Mat(id)     => *id as u32,
+            SrcId::Surf(id)    => *id as u32,
+            SrcId::MatSurf(id) => *id as u32,
+            SrcId::Light(id)   => *id as u32,
+        }
+    }
+}
+
+impl Deref for SrcId {
+    type Target = u16;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            SrcId::None       => panic!("Cannot deref None SrcId"),
+            Self::Mat(id)     => id,
+            Self::Surf(id)    => id,
+            Self::MatSurf(id) => id,
+            Self::Light(id)   => id,
         }
     }
 }

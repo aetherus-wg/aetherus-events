@@ -1,65 +1,8 @@
 use crate::raw::{self, RawField};
 use crate::{Encode, Decode};
-use std::ops::Deref;
-use serde::{Serialize, Deserialize};
 
 // NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
 // as some nuisances about grouping have not been resolved.
-
-#[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
-pub enum SrcId {
-    None,
-    Mat(u16),
-    Surf(u16),
-    MatSurf(u16),
-    Light(u16),
-}
-
-impl std::fmt::Display for SrcId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SrcId::None        => write!(f, "None"),
-            SrcId::Mat(id)     => write!(f, "Mat({})", id),
-            SrcId::Surf(id)    => write!(f, "Surf({})", id),
-            SrcId::MatSurf(id) => write!(f, "MatSurf({})", id),
-            SrcId::Light(id)   => write!(f, "Light({})", id),
-        }
-    }
-}
-
-impl RawField for SrcId {
-    fn mask() -> u32 { 0x0000FFFF }
-    fn shift() -> usize { 0 }
-    fn bitsize() -> usize { 16 }
-    fn decode(raw: u32) -> Self where Self: Sized {
-        let id = (raw & Self::mask()) as u16;
-        // Here we cannot distinguish between Mat, Surf, MatSurf, Light.
-        // So we default to Mat.
-        SrcId::MatSurf(id)
-    }
-    fn encode(&self) -> u32 {
-        match self {
-            SrcId::None        => 0u32,
-            SrcId::Mat(id)     => *id as u32,
-            SrcId::Surf(id)    => *id as u32,
-            SrcId::MatSurf(id) => *id as u32,
-            SrcId::Light(id)   => *id as u32,
-        }
-    }
-}
-
-impl Deref for SrcId {
-    type Target = u16;
-    fn deref(&self) -> &Self::Target {
-        match self {
-            SrcId::None       => panic!("Cannot deref None SrcId"),
-            Self::Mat(id)     => id,
-            Self::Surf(id)    => id,
-            Self::MatSurf(id) => id,
-            Self::Light(id)   => id,
-        }
-    }
-}
 
 
 #[derive(PartialEq, Debug)]
