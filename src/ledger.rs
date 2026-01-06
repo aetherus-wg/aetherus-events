@@ -94,6 +94,14 @@ impl Uid {
         Self { seq_id, event }
     }
 
+
+    pub fn from_event(seq_id: u32, event: &EventId) -> Self {
+        Self {
+            seq_id,
+            event: event.encode(),
+        }
+    }
+
     pub fn encode(&self) -> u64 {
         ((self.seq_id as u64) << 32) | (self.event.raw() as u64)
     }
