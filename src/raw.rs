@@ -1,6 +1,5 @@
 use num_enum::{TryFromPrimitive, IntoPrimitive};
 use std::convert::TryFrom;
-use std::ops::Deref;
 use std::usize;
 
 pub trait RawField: Clone {

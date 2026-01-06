@@ -17,8 +17,11 @@ use std::hash::{Hash, Hasher};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Uid {
     pub seq_id: u32,
+    #[serde(serialize_with = "array_bytes::ser_hexify_prefixed", deserialize_with = "array_bytes::de_dehexify")]
     pub event: u32, // u32 Event
 }
+
+// TODO: Replace these with `array-bytes` utilities: https://github.com/razvanpopadev/array-bytes/tree/main
 
 impl Hash for Uid {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -36,27 +39,25 @@ impl std::fmt::Debug for Uid {
     }
 }
 
+// TODO: Use (seq_id, event) tuple to ser/deser Uid, such that the format can be `[ 1, 0x03010000]`
+
 impl std::fmt::Display for Uid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0x{:08X}_{:08X}", self.seq_id, self.event)
+        write!(f, "{}, 0x{:08X}", self.seq_id, self.event)
     }
 }
 
 impl FromStr for Uid {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.split(", ").collect();
         let s = s.trim_start_matches("0x");
-        if s.len() != 17 {
-            return Err(format!("Invalid Uid string length: {}", s.len()));
+        if parts.len() != 2 {
+            return Err(format!("Invalid Uid format: {}", s));
         }
-        let seq_id = u32::from_str_radix(&s[0..8], 16)
+        let seq_id = parts[0].parse::<u32>()
             .map_err(|e| format!("Failed to parse seq_id: {}", e))?;
-        assert_eq!(
-            &s[8..9],
-            "_",
-            "Invalid Uid format, expected '_' at position 8"
-        );
-        let event = u32::from_str_radix(&s[9..17], 16)
+        let event = u32::from_str_radix(parts[1].trim_start_matches("0x"), 16)
             .map_err(|e| format!("Failed to parse event: {}", e))?;
         Ok(Uid { seq_id, event })
     }
@@ -115,7 +116,7 @@ impl SerializeAs<BTreeMap<u32, u32>> for HexInnerMap {
 
         let mut map = serializer.serialize_map(Some(value.len()))?;
         for (k, v) in value {
-            let key = format!("{:08X}", k); // hex key
+            let key = format!("0x{:08X}", k); // hex key
             map.serialize_entry(&key, v)?;
         }
         map.end()
@@ -146,7 +147,7 @@ impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
             {
                 let mut out = StdBTreeMap::new();
                 while let Some((k, v)) = access.next_entry::<String, u32>()? {
-                    let key = u32::from_str_radix(&k, 16)
+                    let key = u32::from_str_radix(&k[2..10], 16)
                         .map_err(|e| A::Error::custom(format!("invalid hex key {k}: {e}")))?;
                     out.insert(key, v);
                 }
@@ -173,8 +174,10 @@ pub struct Ledger {
 
     // Use a nested map: (seq_id -> (uid -> next_seq_id)) instead of (seq_id, uid) -> next_seq_id in order to
     // retrieve be able to do a depth search based on seq_id
-    #[serde_as(as = "BTreeMap<DisplayFromStr, HexInnerMap>")]
+    #[serde_as(as = "BTreeMap<_, HexInnerMap>")]
     next: BTreeMap<u32, BTreeMap<u32, u32>>,
+    // TODO: Display of Uid represent event:u32 in hex format `0x{:08X}
+    #[serde_as(as = "BTreeMap<_, DisplayFromStr>")]
     prev: BTreeMap<u32, Uid>,
     next_seq_id: u32,
 }
@@ -492,6 +495,7 @@ impl Ledger {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use std::fs;
 
     #[test]
     fn produce_src_id() {
@@ -657,5 +661,20 @@ mod tests {
             "Temporary directory persisted at: {}",
             _persisted_dir.display()
         );
+
+        let stored_ledger: Ledger = {
+            let contents: String = fs::read_to_string(temp_file_path).expect("Unabel to read json file");
+            serde_json::from_str(&contents).expect("Unable to parse ledger file")
+            // FIXME: Directly reading from file causes conflict with `de_dexify` which expects a
+            // borrowed value
+            // let file = File::open(temp_file_path).expect("Unable to open file");
+            // serde_json::from_reader(file).expect("Unable to parse ledger file")
+        };
+
+        assert_eq!(ledger.grps, stored_ledger.grps);
+        assert_eq!(ledger.src_map, stored_ledger.src_map);
+        assert_eq!(ledger.start_events, stored_ledger.start_events);
+        assert_eq!(ledger.next, stored_ledger.next);
+        assert_eq!(ledger.prev, stored_ledger.prev);
     }
 }
