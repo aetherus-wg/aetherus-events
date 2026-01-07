@@ -84,7 +84,7 @@ impl ScatterDir {
     }
 }
 
-impl Encode for MCRT {
+impl Encode<u32> for MCRT {
     fn encode(&self) -> u32 {
         match self {
             MCRT::Interface(it) => raw::MCRT::Interface.encode() | it.encode(),
@@ -94,7 +94,7 @@ impl Encode for MCRT {
     }
 }
 
-impl Decode for MCRT {
+impl Decode<u32> for MCRT {
     fn decode(raw: u32) -> Self where Self: Sized {
         let mcrt_type = raw::MCRT::decode(raw);
         match mcrt_type {
@@ -105,7 +105,7 @@ impl Decode for MCRT {
     }
 }
 
-impl Encode for Interface {
+impl Encode<u32> for Interface {
     fn encode(&self) -> u32 {
         match self {
             Interface::Reflection  => raw::Interface::Reflection.encode(),
@@ -115,7 +115,7 @@ impl Encode for Interface {
     }
 }
 
-impl Decode for Interface {
+impl Decode<u32> for Interface {
     fn decode(raw: u32) -> Self where Self: Sized {
         let interface_type = raw::Interface::decode(raw);
         match interface_type {
@@ -126,7 +126,7 @@ impl Decode for Interface {
     }
 }
 
-impl Encode for Reflector {
+impl Encode<u32> for Reflector {
     fn encode(&self) -> u32 {
         match self {
             Reflector::Diffuse                  => raw::Reflector::Diffuse.encode(),
@@ -138,7 +138,7 @@ impl Encode for Reflector {
     }
 }
 
-impl Decode for Reflector {
+impl Decode<u32> for Reflector {
     fn decode(raw: u32) -> Self where Self: Sized {
         let reflect_type = raw::Reflector::decode(raw);
         match reflect_type {
@@ -151,7 +151,7 @@ impl Decode for Reflector {
     }
 }
 
-impl Encode for Material {
+impl Encode<u32> for Material {
     fn encode(&self) -> u32 {
         match self {
             Material::Absorption    => raw::Material::Absorption.encode(),
@@ -161,7 +161,7 @@ impl Encode for Material {
     }
 }
 
-impl Decode for Material {
+impl Decode<u32> for Material {
     fn decode(raw: u32) -> Self where Self: Sized {
         let material_type = raw::Material::decode(raw);
         match material_type {
@@ -172,7 +172,7 @@ impl Decode for Material {
     }
 }
 
-impl Encode for Inelastic {
+impl Encode<u32> for Inelastic {
     fn encode(&self) -> u32 {
         match self {
             Inelastic::Raman(dir)        => raw::Inelastic::Raman.encode() | dir.encode(),
@@ -181,7 +181,7 @@ impl Encode for Inelastic {
     }
 }
 
-impl Decode for Inelastic {
+impl Decode<u32> for Inelastic {
     fn decode(raw: u32) -> Self where Self: Sized {
         let inelastic_type = raw::Inelastic::decode(raw);
         match inelastic_type {
@@ -191,7 +191,7 @@ impl Decode for Inelastic {
     }
 }
 
-impl Encode for Elastic {
+impl Encode<u32> for Elastic {
     fn encode(&self) -> u32 {
         match self {
             Elastic::HenyeyGreenstein(dir) => raw::Elastic::HenyeyGreenstein.encode() | dir.encode(),
@@ -202,7 +202,7 @@ impl Encode for Elastic {
     }
 }
 
-impl Decode for Elastic {
+impl Decode<u32> for Elastic {
     fn decode(raw: u32) -> Self where Self: Sized {
         let elastic_type = raw::Elastic::decode(raw);
         match elastic_type {
@@ -214,7 +214,7 @@ impl Decode for Elastic {
     }
 }
 
-impl Encode for ScatterDir {
+impl Encode<u32> for ScatterDir {
     fn encode(&self) -> u32 {
         match self {
             ScatterDir::Any      => raw::ScatterDir::Any.encode(),
@@ -225,7 +225,7 @@ impl Encode for ScatterDir {
     }
 }
 
-impl Decode for ScatterDir {
+impl Decode<u32> for ScatterDir {
     fn decode(raw: u32) -> Self where Self: Sized {
         let dir_type = raw::ScatterDir::decode(raw);
         match dir_type {

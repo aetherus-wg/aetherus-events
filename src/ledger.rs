@@ -6,22 +6,23 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::SrcId;
-use crate::{Encode, EventId, RawEvent, SrcName};
+use crate::{Encode, EventId, RawEvent};
 use serde_json;
 use std::fs::File;
 
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
-// UID combines sequence number and event type [file:1].
+// ----------------------------------------------------
+// Definition of Unique IDentifier (Uid) and methods/traits
+// ----------------------------------------------------
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Uid {
     pub seq_id: u32,
     #[serde(serialize_with = "array_bytes::ser_hexify_prefixed", deserialize_with = "array_bytes::de_dehexify")]
     pub event: u32, // u32 Event
 }
-
-// TODO: Replace these with `array-bytes` utilities: https://github.com/razvanpopadev/array-bytes/tree/main
 
 impl Hash for Uid {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -38,8 +39,6 @@ impl std::fmt::Debug for Uid {
         )
     }
 }
-
-// TODO: Use (seq_id, event) tuple to ser/deser Uid, such that the format can be `[ 1, 0x03010000]`
 
 impl std::fmt::Display for Uid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -62,6 +61,12 @@ impl FromStr for Uid {
         Ok(Uid { seq_id, event })
     }
 }
+
+
+// ----------------------------------------------------
+// Definition of the SrcId RawField,
+// which is used to identify event sources
+// ----------------------------------------------------
 
 impl FromStr for SrcId {
     type Err = String;
@@ -112,58 +117,46 @@ impl Uid {
     }
 }
 
-pub struct HexInnerMap;
 
-impl SerializeAs<BTreeMap<u32, u32>> for HexInnerMap {
-    fn serialize_as<S>(value: &BTreeMap<u32, u32>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeMap;
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub enum SrcName {
+    Light(String),
+    Surf(String),
+    MatSurf(String),
+    Mat(String),
+    Detector(String),
+}
 
-        let mut map = serializer.serialize_map(Some(value.len()))?;
-        for (k, v) in value {
-            let key = format!("0x{:08X}", k); // hex key
-            map.serialize_entry(&key, v)?;
+impl ToString for SrcName {
+    fn to_string(&self) -> String {
+        match self {
+            SrcName::Light(name) => name.clone(),
+            SrcName::Surf(name) => name.clone(),
+            SrcName::MatSurf(name) => name.clone(),
+            SrcName::Mat(name) => name.clone(),
+            SrcName::Detector(name) => name.clone(),
         }
-        map.end()
     }
 }
 
-impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
-    fn deserialize_as<D>(deserializer: D) -> Result<BTreeMap<u32, u32>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{Error as DeError, MapAccess, Visitor};
-        use std::collections::BTreeMap as StdBTreeMap;
-        use std::fmt;
 
-        struct HexInnerVisitor;
+// ----------------------------------------------------
+// Definition of Ledger struct and methods
+// ----------------------------------------------------
+// - write ledger to JSON file
+// - Ledger methods:
+//   - Initialise sources: Materials, Surfaces, Lights, etc
+//   - Group sources for batch ID
+//   - insert events and build the event chain
+//   - query events, using the next/prev maps as a doubled linked list
 
-        impl<'de> Visitor<'de> for HexInnerVisitor {
-            type Value = BTreeMap<u32, u32>;
-
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.write_str("map with hex-encoded u32 keys")
-            }
-
-            fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut out = StdBTreeMap::new();
-                while let Some((k, v)) = access.next_entry::<String, u32>()? {
-                    let key = u32::from_str_radix(&k[2..10], 16)
-                        .map_err(|e| A::Error::custom(format!("invalid hex key {k}: {e}")))?;
-                    out.insert(key, v);
-                }
-                Ok(out)
-            }
-        }
-
-        deserializer.deserialize_map(HexInnerVisitor)
-    }
+pub fn write_ledger_to_json<P>(ledger: &Ledger, file_path: P) -> Result<(), serde_json::Error>
+where
+    P: AsRef<std::path::Path>,
+{
+    // Write the JSON string to a file
+    let file = File::create(file_path).expect("Unable to create file");
+    serde_json::to_writer_pretty(file, ledger)
 }
 
 #[serde_as]
@@ -189,14 +182,6 @@ pub struct Ledger {
     next_seq_id: u32,
 }
 
-pub fn write_ledger_to_json<P>(ledger: &Ledger, file_path: P) -> Result<(), serde_json::Error>
-where
-    P: AsRef<std::path::Path>,
-{
-    // Write the JSON string to a file
-    let file = File::create(file_path).expect("Unable to create file");
-    serde_json::to_writer_pretty(file, ledger)
-}
 
 impl Ledger {
     pub fn new() -> Self {
@@ -491,13 +476,64 @@ impl Ledger {
             warn!("Surface ID and Material-Surface ID ranges are overlapping");
         }
     }
+}
 
-    fn get_prev_map(&self) -> &BTreeMap<u32, Uid> {
-        &self.prev
+// ----------------------------------------------------
+// Helper methods and structs
+// ----------------------------------------------------
+// - Custom serializer/deserializer for BTreeMap<u32, u32> with hex keys
+
+pub struct HexInnerMap;
+
+impl SerializeAs<BTreeMap<u32, u32>> for HexInnerMap {
+    fn serialize_as<S>(value: &BTreeMap<u32, u32>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(value.len()))?;
+        for (k, v) in value {
+            let key = format!("0x{:08X}", k); // hex key
+            map.serialize_entry(&key, v)?;
+        }
+        map.end()
     }
+}
 
-    fn get_src_map(&self) -> &HashMap<SrcId, Vec<SrcName>> {
-        &self.src_map
+impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
+    fn deserialize_as<D>(deserializer: D) -> Result<BTreeMap<u32, u32>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error as DeError, MapAccess, Visitor};
+        use std::collections::BTreeMap as StdBTreeMap;
+        use std::fmt;
+
+        struct HexInnerVisitor;
+
+        impl<'de> Visitor<'de> for HexInnerVisitor {
+            type Value = BTreeMap<u32, u32>;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("map with hex-encoded u32 keys")
+            }
+
+            fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut out = StdBTreeMap::new();
+                while let Some((k, v)) = access.next_entry::<String, u32>()? {
+                    let key = u32::from_str_radix(&k[2..10], 16)
+                        .map_err(|e| A::Error::custom(format!("invalid hex key {k}: {e}")))?;
+                    out.insert(key, v);
+                }
+                Ok(out)
+            }
+        }
+
+        deserializer.deserialize_map(HexInnerVisitor)
     }
 }
 
@@ -579,7 +615,7 @@ mod tests {
         let mut ledger = Ledger::new();
         let emission_event = EventId {
             event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
-            src_id: 1,
+            src_id: SrcId::Light(2),
         };
         let uid1 = ledger.insert_start(emission_event);
         assert_eq!(uid1.seq_id, 0);
@@ -590,13 +626,13 @@ mod tests {
                 HenyeyGreenstein,
                 Forward
             )),
-            src_id: 2,
+            src_id: SrcId::Mat(2),
         };
         let uid2 = ledger.insert(uid1.clone(), mcrt_event);
         assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
             event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
-            src_id: 2,
+            src_id: SrcId::Mat(2),
         };
         let uid3 = ledger.insert(uid2.clone(), mcrt_event);
         assert_eq!(uid3.seq_id, 2);
@@ -628,20 +664,20 @@ mod tests {
         // TODO: Complete the entire implementation to test the json writer
         let emission_event = EventId {
             event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
-            src_id: 1,
+            src_id: SrcId::Light(1),
         };
         let uid1 = ledger.insert_start(emission_event);
 
         let mcrt_event = EventId {
             event_type: crate::EventType::MCRT(crate::mcrt_event!(Interface, Refraction)),
-            src_id: *surf_src_id,
+            src_id: surf_src_id,
         };
         let uid2 = ledger.insert(uid1.clone(), mcrt_event);
 
         assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
             event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
-            src_id: *mat_src_id,
+            src_id: mat_src_id,
         };
         let uid3 = ledger.insert(uid2.clone(), mcrt_event);
 

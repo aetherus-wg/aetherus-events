@@ -20,7 +20,7 @@ pub trait RawField: Clone {
     where
         Self: Into<u8>,
     {
-        let value = (<Self as Into<u8>>::into(self.clone()) as u32) << Self::shift();
+        let value = (self.clone().into() as u32) << Self::shift();
         debug_assert!(value & Self::mask() == value, "Encoded value exceeds field mask");
         value
     }

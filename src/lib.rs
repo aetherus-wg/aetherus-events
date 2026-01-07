@@ -12,12 +12,12 @@ use log::warn;
 // =======================================
 // Traits for encoding and decoding events
 // =======================================
-pub trait Encode {
-    fn encode(&self) -> u32;
+pub trait Encode<T> {
+    fn encode(&self) -> T;
 }
 
-pub trait Decode {
-    fn decode(raw: u32) -> Self where Self: Sized;
+pub trait Decode<T> {
+    fn decode(raw: T) -> Self where Self: Sized;
 }
 
 pub trait RawEvent: std::hash::Hash + Clone + Eq + std::fmt::Debug + serde::Serialize + for<'de> serde::Deserialize<'de> {
@@ -43,28 +43,7 @@ pub enum EventType {
 #[derive(Debug)]
 pub struct EventId {
     pub event_type: EventType,
-    pub src_id:     u16,
-}
-
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
-pub enum SrcName {
-    Light(String),
-    Surf(String),
-    MatSurf(String),
-    Mat(String),
-    Detector(String),
-}
-
-impl ToString for SrcName {
-    fn to_string(&self) -> String {
-        match self {
-            SrcName::Light(name) => name.clone(),
-            SrcName::Surf(name) => name.clone(),
-            SrcName::MatSurf(name) => name.clone(),
-            SrcName::Mat(name) => name.clone(),
-            SrcName::Detector(name) => name.clone(),
-        }
-    }
+    pub src_id:     SrcId,
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
@@ -92,6 +71,8 @@ impl RawField for SrcId {
     fn mask() -> u32 { 0x0000FFFF }
     fn shift() -> usize { 0 }
     fn bitsize() -> usize { 16 }
+    // FIXME: The decode and encode implementations don't work because the default trait functions
+    // required that Self is TryFrom<u8> and Into<u8>.
     fn decode(raw: u32) -> Self {
         let id = (raw & Self::mask()) as u16;
         match Pipeline::decode(raw) {
@@ -138,19 +119,19 @@ impl Deref for SrcId {
 }
 
 impl EventId {
-    pub fn new(event_type: EventType, src_id: u16) -> Self {
+    pub fn new(event_type: EventType, src_id: SrcId) -> Self {
         EventId {
             event_type,
             src_id,
         }
     }
-    pub fn new_emission(emission_event: emission::Emission, light_id: u16) -> Self {
+    pub fn new_emission(emission_event: emission::Emission, light_id: SrcId) -> Self {
         EventId {
             event_type: EventType::Emission(emission_event),
             src_id: light_id,
         }
     }
-    pub fn new_mcrt(mcrt_event: mcrt::MCRT, matsurf_id: u16) -> Self {
+    pub fn new_mcrt(mcrt_event: mcrt::MCRT, matsurf_id: SrcId) -> Self {
         EventId {
             event_type: EventType::MCRT(mcrt_event),
             src_id: matsurf_id,
@@ -158,36 +139,37 @@ impl EventId {
     }
 }
 
-impl Decode for EventId {
+impl Decode<u32> for EventId {
     fn decode(raw: u32) -> Self {
         let pipeline = raw::Pipeline::decode(raw);
-        let event_type = match pipeline {
-            raw::Pipeline::MCRT => EventType::MCRT(mcrt::MCRT::decode(raw)),
-            raw::Pipeline::Emission => EventType::Emission(emission::Emission::decode(raw)),
-            raw::Pipeline::Detection => EventType::Detection,
-            _ => panic!("Cannot decode {:?} pipeline event", pipeline),
+        let src_id_raw = (raw & 0xFFFF) as u16;
+        let (event_type, src_id) = match pipeline {
+            // TODO: Resolve correct SrcId type for MCRT rather than using the superset
+            raw::Pipeline::MCRT      => (EventType::MCRT(mcrt::MCRT::decode(raw)), SrcId::MatSurf(src_id_raw)),
+            raw::Pipeline::Emission  => (EventType::Emission(emission::Emission::decode(raw)), SrcId::Light(src_id_raw)),
+            raw::Pipeline::Detection => (EventType::Detection, SrcId::None),
+            _                        => panic!("Cannot decode {:?} pipeline event", pipeline),
         };
-        let src_id = (raw & 0xFFFF) as u16;
-        EventId {
-            event_type,
-            src_id,
-        }
+        EventId { event_type, src_id }
     }
 }
 
-impl Encode for EventId {
+impl Encode<u32> for EventId {
     fn encode(&self) -> u32 {
         let event_type_code = match &self.event_type {
-            EventType::None => panic!("Cannot encode None event type"),
-            EventType::MCRT(mcrt_event) => raw::Pipeline::MCRT.encode() | mcrt_event.encode(),
+            EventType::None               => panic!("Cannot encode None event type"),
+            EventType::MCRT(mcrt_event)   => raw::Pipeline::MCRT.encode() | mcrt_event.encode(),
             EventType::Emission(emission) => raw::Pipeline::Emission.encode() | emission.encode(),
-            EventType::Detection => raw::Pipeline::Detection.encode(),
+            EventType::Detection          => raw::Pipeline::Detection.encode(),
             _ => panic!("Cannot encode event type as MCRT event"),
         };
-        event_type_code | (self.src_id as u32)
+        event_type_code | (*self.src_id as u32)
     }
 }
 
+// NOTE: Implementing this seems superfluous to the EventId::decode(u32)
+// Only reason this could be useful if there are other desirable way to encode the events,
+// but that's doubtful since the encoding scheme is taylored for u32
 impl RawEvent for u32 {
 
     fn pipeline(&self) -> raw::Pipeline {
@@ -204,6 +186,11 @@ impl RawEvent for u32 {
         *self
     }
 }
+
+
+// --------------------------------------
+// Unit tests for encoding and decoding
+// --------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -235,13 +222,13 @@ mod tests {
             },
             _ => panic!("Expected EventType::MCRT"),
         }
-        assert_eq!(event_id.src_id, 1);
+        assert_eq!(event_id.src_id, SrcId::MatSurf(1));
     }
 
     #[test]
     fn encoding_mcrt_event() {
         let mcrt_event = mcrt_event!(Material, Elastic, Mie, Any);
-        let event_id = EventId::new_mcrt(mcrt_event, 1);
+        let event_id = EventId::new_mcrt(mcrt_event, SrcId::Mat(1));
         let raw_event = event_id.encode();
         assert_eq!(raw_event, 0x03a40001); // Pipeline: MCRT (3), MCRT Type: Material (2), Material Type: Elastic (0), Elastic Type: Mie (1), SrcId: 1
     }
