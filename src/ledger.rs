@@ -94,7 +94,6 @@ impl Uid {
         Self { seq_id, event }
     }
 
-
     pub fn from_event(seq_id: u32, event: &EventId) -> Self {
         Self {
             seq_id,
@@ -190,7 +189,10 @@ pub struct Ledger {
     next_seq_id: u32,
 }
 
-pub fn write_ledger_to_json(ledger: &Ledger, file_path: &str) -> Result<(), serde_json::Error> {
+pub fn write_ledger_to_json<P>(ledger: &Ledger, file_path: P) -> Result<(), serde_json::Error>
+where
+    P: AsRef<std::path::Path>,
+{
     // Write the JSON string to a file
     let file = File::create(file_path).expect("Unable to create file");
     serde_json::to_writer_pretty(file, ledger)
