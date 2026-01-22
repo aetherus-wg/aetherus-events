@@ -17,6 +17,7 @@ pub enum Interface {
     Reflection,
     Refraction,
     ReEmittance,
+    Boundary,
 }
 
 #[derive(PartialEq, Debug)]
@@ -111,6 +112,7 @@ impl Encode<u32> for Interface {
             Interface::Reflection  => raw::Interface::Reflection.encode(),
             Interface::Refraction  => raw::Interface::Refraction.encode(),
             Interface::ReEmittance => raw::Interface::ReEmittance.encode(),
+            Interface::Boundary    => raw::Interface::Boundary.encode(),
         }
     }
 }
@@ -122,6 +124,7 @@ impl Decode<u32> for Interface {
             raw::Interface::Reflection  => Interface::Reflection,
             raw::Interface::Refraction  => Interface::Refraction,
             raw::Interface::ReEmittance => Interface::ReEmittance,
+            raw::Interface::Boundary    => Interface::Boundary,
         }
     }
 }

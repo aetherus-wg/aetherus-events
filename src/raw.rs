@@ -65,6 +65,7 @@ pub enum Interface {
     Reflection = 0,
     Refraction = 1,
     ReEmittance = 4,
+    Boundary = 8,
     // Custom 32-63
 }
 
@@ -230,7 +231,7 @@ mod tests {
 
     #[test]
     fn interface_encoding() {
-        let dec_list = vec![Interface::Reflection, Interface::Refraction, Interface::ReEmittance];
+        let dec_list = vec![Interface::Reflection, Interface::Refraction, Interface::ReEmittance, Interface::Boundary];
         let enc_list = vec![0x00000000, 0x00010000, 0x00040000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());

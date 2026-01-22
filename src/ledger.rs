@@ -176,7 +176,6 @@ pub struct Ledger {
     // retrieve be able to do a depth search based on seq_id
     #[serde_as(as = "BTreeMap<_, HexInnerMap>")]
     next: BTreeMap<u32, BTreeMap<u32, u32>>,
-    // TODO: Display of Uid represent event:u32 in hex format `0x{:08X}
     #[serde_as(as = "BTreeMap<_, DisplayFromStr>")]
     prev: BTreeMap<u32, Uid>,
     next_seq_id: u32,
