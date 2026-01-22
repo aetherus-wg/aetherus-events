@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use aetherus_events::{filter_seq, ledger::Ledger};
 use aetherus_events::SrcId;
-use aetherus_events::filter::find_forward_uid_seq;
+use aetherus_events::filter::{find_forward_uid_seq, BitsProperty};
 
 #[derive(Deserialize, Serialize)]
 struct CsvRecord {
@@ -57,7 +57,7 @@ fn main() {
         filter_seq!(MCRT, Interface, Refraction, SrcId::Surf(0xFFFF)),
         filter_seq!(MCRT, Material, Elastic, HenyeyGreenstein, Any, SrcId::Mat(0xFFFF)),
         filter_seq!(Detection, SrcId::None),
-    ];
+    ].into_iter().map(|bits_match| BitsProperty::Match(bits_match)).collect();
 
     println!("Filter seq: {:?}", filter_seq);
 

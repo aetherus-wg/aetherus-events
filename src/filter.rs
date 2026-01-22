@@ -51,6 +51,9 @@ impl BitsMatch {
     pub fn new(mask: u32, value: u32) -> Self {
         BitsMatch { mask, value }
     }
+    pub fn from_event(event: u32) -> Self {
+        BitsMatch { mask: 0xFFFFFFFF, value: event }
+    }
 }
 impl fmt::Debug for BitsMatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -58,48 +61,73 @@ impl fmt::Debug for BitsMatch {
     }
 }
 
-struct SeqQueueEntry {
-    pub uid: Uid,
-    pub bits_match_seq: VecDeque<BitsMatch>,
+#[derive(Clone, Debug)]
+pub enum BitsProperty {
+    Match(BitsMatch),
+    NoMatch(BitsMatch),
 }
 
-pub fn find_forward_uid_seq(ledger: &Ledger, bits_match_seq: Vec<BitsMatch>) -> Vec<Uid> {
+impl Default for BitsProperty {
+    fn default() -> Self {
+        BitsProperty::Match(BitsMatch { mask: 0, value: 0 })
+    }
+}
+
+impl BitsProperty {
+    pub fn matches(&self, event: u32) -> bool {
+        match self {
+            BitsProperty::Match(bits_match) => {
+                (event & bits_match.mask) == bits_match.value
+            },
+            BitsProperty::NoMatch(bits_match) => {
+                (event & bits_match.mask) != bits_match.value
+            },
+        }
+    }
+}
+
+struct SeqQueueEntry {
+    pub uid: Uid,
+    pub bits_property_seq: VecDeque<BitsProperty>,
+}
+
+pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty>) -> Vec<Uid> {
     let mut seq_queue: VecDeque<SeqQueueEntry> = VecDeque::new();
     let mut found_uids: Vec<Uid> = Vec::new();
     // Initialize the queue with all events that have seq_no=0
     for uid in ledger.get_start_events() {
         seq_queue.push_back(SeqQueueEntry {
             uid: *uid,
-            bits_match_seq: bits_match_seq.clone().into(),
+            bits_property_seq: bits_property_seq.clone().into(),
         });
     }
     while !seq_queue.is_empty() {
         let uid_seq = seq_queue.pop_front().unwrap();
         if ledger.get_next(&uid_seq.uid).is_empty() {
             // If last UID in sequence of events, output as valid UID
-            if uid_seq.bits_match_seq.is_empty() {
+            if uid_seq.bits_property_seq.is_empty() {
                 found_uids.push(uid_seq.uid);
             }
         } else {
             let next_uids = ledger.get_next(&uid_seq.uid);
             assert!(next_uids.len() > 0, "No more subsequent events for UID: {}", uid_seq.uid);
             for next_uid in next_uids {
-                if uid_seq.bits_match_seq.is_empty() {
+                if uid_seq.bits_property_seq.is_empty() {
                     seq_queue.push_back(SeqQueueEntry {
                         uid: next_uid,
-                        bits_match_seq: uid_seq.bits_match_seq.clone()
+                        bits_property_seq: uid_seq.bits_property_seq.clone()
                     });
 
                 } else {
-                    let bits_match = uid_seq.bits_match_seq.front().unwrap();
-                    let mut new_bits_match_seq = uid_seq.bits_match_seq.clone();
-                    if (next_uid.event & bits_match.mask) == bits_match.value {
+                    let bits_property = uid_seq.bits_property_seq.front().unwrap();
+                    let mut new_bits_property_seq = uid_seq.bits_property_seq.clone();
+                    if bits_property.matches(next_uid.event) {
                         // Match found, proceed to next event in sequence
-                        new_bits_match_seq.pop_front();
+                        new_bits_property_seq.pop_front();
                     }
                     seq_queue.push_back(SeqQueueEntry {
                         uid: next_uid,
-                        bits_match_seq: new_bits_match_seq
+                        bits_property_seq: new_bits_property_seq
                     });
                 }
             }
