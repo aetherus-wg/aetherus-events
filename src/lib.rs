@@ -109,7 +109,7 @@ impl Deref for SrcId {
     type Target = u16;
     fn deref(&self) -> &Self::Target {
         match self {
-            SrcId::None       => panic!("Cannot deref None SrcId"),
+            SrcId::None       => &0u16,
             Self::Mat(id)     => id,
             Self::Surf(id)    => id,
             Self::MatSurf(id) => id,

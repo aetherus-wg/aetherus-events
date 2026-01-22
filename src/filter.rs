@@ -137,6 +137,16 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
     found_uids
 }
 
+pub fn find_dangling_uids(ledger: &Ledger, bits_property: BitsProperty) -> Vec<Uid> {
+    let mut found_uids: Vec<Uid> = Vec::new();
+    for uid in ledger.get_dangling_uids() {
+        if bits_property.matches(uid.event) {
+            found_uids.push(uid);
+        }
+    }
+    found_uids
+}
+
 #[macro_export]
 macro_rules! filter_seq {
     // Single event filter
@@ -398,4 +408,50 @@ macro_rules! filter_detect_seq {
     ($supertype:ident, $subtype:ident, $scatter:ident, $dir:ident, $src_id:expr) => {
         (0, 0)
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{EventId, SrcId, EventType};
+
+    #[test]
+    fn test_find_dangling_uids_empty_ledger() {
+        let ledger = Ledger::new(); // Assuming Ledger has a `new` method
+        let bits_property = BitsProperty::default(); // Assuming BitsProperty has a `default` method
+
+        let result = find_dangling_uids(&ledger, bits_property);
+        assert!(result.is_empty(), "Expected no dangling UIDs in an empty ledger");
+    }
+
+    #[test]
+    fn test_find_dangling_uids_no_dangling() {
+        let mut ledger = Ledger::new();
+
+        // Populate ledger with non-dangling UIDs
+        let event = ledger.insert_start(EventId::new(EventType::Detection, SrcId::None));
+        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+
+        let bits_property = BitsProperty::NoMatch(BitsMatch::new(0xFFFFFFFF, event.event));
+
+        let result = find_dangling_uids(&ledger, bits_property);
+        assert_eq!(result.len(), 0, "Expected no dangling UIDs");
+    }
+
+    #[test]
+    fn test_find_dangling_uids_dangling() {
+        let mut ledger = Ledger::new();
+
+        // Populate ledger with non-dangling UIDs
+        let event = ledger.insert_start(EventId::new(EventType::Detection, SrcId::None));
+        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+
+        let bits_property = BitsProperty::Match(BitsMatch::new(0xFFFFFFFF, event.event));
+
+        let result = find_dangling_uids(&ledger, bits_property);
+        assert_eq!(result.len(), 1, "Expected exactly one dangling UIDs");
+
+    }
 }

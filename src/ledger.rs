@@ -412,6 +412,46 @@ impl Ledger {
         uid
     }
 
+    /// WARN: This is meant to be called only with dangling UIDs
+    pub fn prune(&mut self, uid: &Uid) {
+        let mut bifurcate = false;
+        let mut current_uid = uid.clone();
+
+        while !bifurcate {
+            self.next
+                .get_mut(&current_uid.seq_id)
+                .map(|map| map.remove(&current_uid.event));
+
+            if let Some(prev_uid) = self.prev.get(&current_uid.seq_id).cloned() {
+                self.prev.remove(&current_uid.seq_id);
+
+                bifurcate = self.next.get(&current_uid.seq_id).expect("Could not find seq_id in the next map").len() > 0;
+
+                if !bifurcate {
+                    self.next.remove(&current_uid.seq_id);
+                }
+
+                current_uid = prev_uid;
+            } else {
+                // FIXME: This should not happend, but it appears to happen in several cases
+                //println!("WARN: Reached the start of the chain while pruning Uid {:?}", current_uid);
+                break;
+            }
+        }
+    }
+
+    pub fn get_dangling_uids(&self) -> Vec<Uid> {
+        let mut dangling_uids = Vec::new();
+        for (seq_id, map) in &self.next {
+            if map.is_empty() {
+                if let Some(uid) = self.prev.get(seq_id) {
+                    dangling_uids.push(uid.clone());
+                }
+            }
+        }
+        dangling_uids
+    }
+
     fn insert_entry(&mut self, uid: Uid, next_seq_id: u32) -> bool {
         if None == self.get_next_seq_id(&uid) {
             if self.next.get(&uid.seq_id) == None {
@@ -422,6 +462,8 @@ impl Ledger {
                 .unwrap()
                 .insert(uid.event, next_seq_id);
             self.prev.insert(next_seq_id, uid.clone());
+            // Prepare the next seq_id entry
+            self.next.insert(next_seq_id, BTreeMap::new());
             true
         } else {
             false
@@ -721,5 +763,19 @@ mod tests {
         assert_eq!(ledger.start_events, stored_ledger.start_events);
         assert_eq!(ledger.next, stored_ledger.next);
         assert_eq!(ledger.prev, stored_ledger.prev);
+    }
+
+    #[test]
+    fn test_find_dangling_uids() {
+        use crate::EventType;
+        let mut ledger = Ledger::new();
+
+        // Populate ledger with non-dangling UIDs
+        let event = ledger.insert_start(EventId::new(EventType::Detection, SrcId::None));
+        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+        let _event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+
+        let result = ledger.get_dangling_uids();
+        assert_eq!(result.len(), 1, "Expected exactly one dangling UID in a simple chain");
     }
 }
