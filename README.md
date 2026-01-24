@@ -2,7 +2,8 @@
 # Model EventType Ledger Design
 The ledger will be composed of two hash maps (key-value stores) that allows us to traverser the unique IDs (UID) of each event in each generation sequence.
 
-[![Rust](https://github.com/aetherus-wg/aetherus-events/actions/workflows/rust.yml/badge.svg)](https://github.com/aetherus-wg/aetherus-events/actions/workflows/rust.yml)
+[![build](https://github.com/aetherus-wg/aetherus-events/actions/workflows/rust.yml/badge.svg)](https://github.com/aetherus-wg/aetherus-events/actions/workflows/rust.yml)
+![GitHub Tag](https://img.shields.io/github/v/tag/aetherus-wg/aetherus-events)
 
 The photons collected are received in packets composed of:
 ```Rust
