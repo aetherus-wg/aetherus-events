@@ -423,19 +423,22 @@ impl Ledger {
                 .map(|map| map.remove(&current_uid.event));
 
             if let Some(prev_uid) = self.prev.get(&current_uid.seq_id).cloned() {
-                self.prev.remove(&current_uid.seq_id);
 
-                bifurcate = self.next.get(&current_uid.seq_id).expect("Could not find seq_id in the next map").len() > 0;
+                bifurcate = match self.next.get(&current_uid.seq_id) {
+                    Some(next_map) => next_map.len() > 0,
+                    None => {
+                        panic!("Inconsistent Ledger state: missing next entry for seq_id {}", current_uid.seq_id);
+                    },
+                };
 
                 if !bifurcate {
+                    self.prev.remove(&current_uid.seq_id);
                     self.next.remove(&current_uid.seq_id);
                 }
 
                 current_uid = prev_uid;
             } else {
-                // FIXME: This should not happend, but it appears to happen in several cases
-                //println!("WARN: Reached the start of the chain while pruning Uid {:?}", current_uid);
-                break;
+                panic!("Inconsistent Ledger state: missing prev entry for seq_id {}", current_uid.seq_id);
             }
         }
     }
@@ -580,6 +583,12 @@ impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
 
 #[cfg(test)]
 mod tests {
+    use crate::filter::BitsProperty;
+    use crate::mcrt_event;
+    use crate::EventType;
+    use crate::emission::Emission;
+    use crate::pattern;
+
     use super::*;
     use tempfile::tempdir;
     use std::fs;
@@ -766,8 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn test_find_dangling_uids() {
-        use crate::EventType;
+    fn test_prune_dangling_uids() {
         let mut ledger = Ledger::new();
 
         // Populate ledger with non-dangling UIDs
@@ -777,5 +785,40 @@ mod tests {
 
         let result = ledger.get_dangling_uids();
         assert_eq!(result.len(), 1, "Expected exactly one dangling UID in a simple chain");
+    }
+
+    #[test]
+    fn test_prune_until_bifurcation() {
+        let mut ledger = Ledger::new();
+
+        // Populate ledger with non-dangling UIDs
+        let uid_0 = ledger.insert_start(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
+        let uid_1 = ledger.insert(uid_0, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
+
+        let uid_21 = ledger.insert(uid_1, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
+        let uid_22 = ledger.insert(uid_21, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
+        let uid_231 = ledger.insert(uid_22, EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+        let uid_232 = ledger.insert(uid_22, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
+        let uid_2321 = ledger.insert(uid_232, EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+
+
+        let uid_31 = ledger.insert(uid_1, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
+        let uid_32 = ledger.insert(uid_31, EventId::new(EventType::Detection, SrcId::Surf(1)));
+
+        let dangling_uids = ledger.get_dangling_uids();
+        assert_eq!(dangling_uids.len(), 3, "Expected dangling UIDs");
+        let dangling_lost_uids = dangling_uids
+                                  .into_iter()
+                                  .filter(|uid| BitsProperty::NoMatch(pattern!(Detection, SrcId::Surf(1))).matches(uid.event))
+                                  .collect::<Vec<_>>();
+
+        assert_eq!(dangling_lost_uids.len(), 2, "Expected dangling UID to be pruned");
+
+        println!("{:?}", ledger);
+
+        for uid in dangling_lost_uids {
+            println!("Pruning UID: {:?}", uid);
+            ledger.prune(&uid);
+        }
     }
 }
