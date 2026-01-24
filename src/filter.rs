@@ -148,13 +148,13 @@ pub fn find_dangling_uids(ledger: &Ledger, bits_property: BitsProperty) -> Vec<U
 }
 
 #[macro_export]
-macro_rules! filter_seq {
+macro_rules! pattern {
     // Single event filter
     // 1. Generic EventType: filter_seq!(Pipeline | EventType | SrcId)
     // i.e. `filter_seq!(MCRT | _ | MatSurfId(u16))` or `filter_seq!(Emission | Laser | LightId(u16))
     ($pipeline:ident, $src_id:expr) => {{
         use $crate::raw::{Pipeline, RawField};
-        use $crate::{filter_mcrt_seq, filter_emit_seq, filter_detect_seq};
+        use $crate::{filter_emit_seq, filter_detect_seq};
         use $crate::filter::BitsMatch;
         // TODO: Check if ident is MCRT, then SrcId matches Surf, Mat or MatSurf Ids
 
@@ -394,9 +394,11 @@ macro_rules! filter_emit_seq {
 macro_rules! filter_detect_seq {
     // 1. Generic EventType: filter_seq!(Pipeline::MCRT | EventType | SrcId)
     ($src_id:expr) => {{
-        // TODO: Complete implementation and SrcId::Detector
-        assert!(matches!($src_id, SrcId::None), "Detection events do not have associated SrcId");
-        (0, 0)
+        if ($src_id != SrcId::None) {
+            (0, 0)
+        } else {
+            (SrcId::mask(), *$src_id as u32)
+        }
     }};
     ($event_type:tt, $src_id:expr) => {
         // TODO: Complete implementation and SrcId::Detector

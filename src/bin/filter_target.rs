@@ -5,7 +5,7 @@ use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 
-use aetherus_events::{filter_seq, ledger::Ledger};
+use aetherus_events::{pattern, ledger::Ledger};
 use aetherus_events::SrcId;
 use aetherus_events::filter::{find_forward_uid_seq, BitsProperty};
 
@@ -54,9 +54,9 @@ fn main() {
     let ledger: Ledger = serde_json::from_str(&json_data).expect("Unable to parse ledger file");
 
     let filter_seq = vec![
-        filter_seq!(MCRT, Interface, Refraction, SrcId::Surf(0xFFFF)),
-        filter_seq!(MCRT, Material, Elastic, HenyeyGreenstein, Any, SrcId::Mat(0xFFFF)),
-        filter_seq!(Detection, SrcId::None),
+        pattern!(MCRT,      Interface, Refraction,                    SrcId::Surf(0xFFFF)),
+        pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Any, SrcId::Mat(0xFFFF)),
+        pattern!(Detection,                                           SrcId::None),
     ].into_iter().map(|bits_match| BitsProperty::Match(bits_match)).collect();
 
     println!("Filter seq: {:?}", filter_seq);
