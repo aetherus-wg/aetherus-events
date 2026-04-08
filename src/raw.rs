@@ -8,22 +8,40 @@ pub trait RawField: Clone {
     fn bitsize() -> usize;
     fn decode(raw: u32) -> Self
     where
-        Self: TryFrom<u8>,
-        <Self as TryFrom<u8>>::Error: std::fmt::Debug,
+        Self: TryFrom<u32>,
+        <Self as TryFrom<u32>>::Error: std::fmt::Debug,
     {
-        let value = ((raw & Self::mask()) >> Self::shift()) as u8;
+        let value = ((raw & Self::mask()) >> Self::shift()) as u32;
         Self::try_from(value).unwrap_or_else( |err| {
             panic!("Failed to convert value: {:?}, error: {:?}", value, err);
         })
     }
     fn encode(&self) -> u32
     where
-        Self: Into<u8>,
+        Self: Into<u32>,
     {
         let value = (self.clone().into() as u32) << Self::shift();
         debug_assert!(value & Self::mask() == value, "Encoded value exceeds field mask");
         value
     }
+}
+
+#[macro_export]
+macro_rules! impl_u8_raw_field {
+    ($t:ty) => {
+        impl TryFrom<u32> for $t {
+            type Error = String;
+            fn try_from(value: u32) -> Result<Self, Self::Error> {
+                let v = u8::try_from(value).map_err(|_| format!("Overflow error: {:#x} does not fit in u8 type", value))?;
+                Self::try_from(v).map_err(|e| format!("{e}"))
+            }
+        }
+        impl Into<u32> for $t {
+            fn into(self) -> u32 {
+                u8::from(self) as u32
+            }
+        }
+    };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
@@ -36,6 +54,7 @@ pub enum Pipeline {
     // Other codes are free to be used for custom pipeline stages
 }
 
+impl_u8_raw_field!(Pipeline);
 impl RawField for Pipeline {
     fn mask() -> u32 { 0x0F000000 }
     fn shift() -> usize { 24 }
@@ -52,6 +71,7 @@ pub enum MCRT {
     //Custom    = 3,
 }
 
+impl_u8_raw_field!(MCRT);
 impl RawField for MCRT {
     fn mask() -> u32 { 0x00C00000 }
     fn shift() -> usize { 22 }
@@ -69,6 +89,7 @@ pub enum Interface {
     // Custom 32-63
 }
 
+impl_u8_raw_field!(Interface);
 impl RawField for Interface {
     fn mask() -> u32 { 0x003F0000 }
     fn shift() -> usize { 16 }
@@ -90,6 +111,7 @@ pub enum Reflector {
     // Custom others
 }
 
+impl_u8_raw_field!(Reflector);
 impl RawField for Reflector {
     fn mask() -> u32 { 0x003F0000 }
     fn shift() -> usize { 16 }
@@ -105,6 +127,7 @@ pub enum Material {
     Elastic    = 0b10,
 }
 
+impl_u8_raw_field!(Material);
 impl RawField for Material {
     fn mask() -> u32 { 0x00300000 }
     fn shift() -> usize { 20 }
@@ -119,6 +142,7 @@ pub enum Inelastic {
     Fluorescence = 0b01,
 }
 
+impl_u8_raw_field!(Inelastic);
 impl RawField for Inelastic {
     fn mask() -> u32 { 0x000C0000 }
     fn shift() -> usize { 18 }
@@ -135,6 +159,7 @@ pub enum Elastic {
     SphericalCdf     = 0b11,
 }
 
+impl_u8_raw_field!(Elastic);
 impl RawField for Elastic {
     fn mask() -> u32 { 0x000C0000 }
     fn shift() -> usize { 18 }
@@ -151,6 +176,7 @@ pub enum ScatterDir {
     Backward = 0b11,
 }
 
+impl_u8_raw_field!(ScatterDir);
 impl RawField for ScatterDir {
     fn mask() -> u32 { 0x00030000 }
     fn shift() -> usize { 16 }
