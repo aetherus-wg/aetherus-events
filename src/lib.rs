@@ -53,6 +53,7 @@ pub enum SrcId {
     Surf(u16),
     MatSurf(u16),
     Light(u16),
+    Detector(u16),
 }
 
 impl std::fmt::Display for SrcId {
@@ -63,6 +64,7 @@ impl std::fmt::Display for SrcId {
             SrcId::Surf(id)    => write!(f, "Surf({})", id),
             SrcId::MatSurf(id) => write!(f, "MatSurf({})", id),
             SrcId::Light(id)   => write!(f, "Light({})", id),
+            SrcId::Detector(id)     => write!(f, "Det({})", id),
         }
     }
 }
@@ -101,6 +103,7 @@ impl RawField for SrcId {
             SrcId::Surf(id)    => *id as u32,
             SrcId::MatSurf(id) => *id as u32,
             SrcId::Light(id)   => *id as u32,
+            SrcId::Detector(id)     => *id as u32,
         }
     }
 }
@@ -114,6 +117,7 @@ impl Deref for SrcId {
             Self::Surf(id)    => id,
             Self::MatSurf(id) => id,
             Self::Light(id)   => id,
+            Self::Detector(id)     => id,
         }
     }
 }

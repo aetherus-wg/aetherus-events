@@ -249,6 +249,9 @@ impl Ledger {
                 SrcId::Light(_) => {
                     panic!("Group name {} already used for a light source", grp_name);
                 }
+                SrcId::Detector(_) => {
+                    panic!("Group name {} already used for a detector sink", grp_name);
+                }
                 SrcId::None => {
                     panic!("Group name {} registered an invalid None source", grp_name);
                 }
@@ -348,6 +351,9 @@ impl Ledger {
                 }
                 SrcId::Light(_) => {
                     panic!("Group name {} already used for a light source", grp_name);
+                }
+                SrcId::Detector(_) => {
+                    panic!("Group name {} already used for a detector sink", grp_name);
                 }
                 SrcId::None => {
                     panic!("Group name {} registered an invalid None source", grp_name);
