@@ -118,7 +118,7 @@ impl Uid {
 }
 
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Hash, Eq)]
 pub enum SrcName {
     Light(String),
     Surf(String),
@@ -252,6 +252,9 @@ impl Ledger {
                 SrcId::Detector(_) => {
                     panic!("Group name {} already used for a detector sink", grp_name);
                 }
+                SrcId::SrcId(_) => {
+                    panic!("SrcId reserved as an abstract super type");
+                }
                 SrcId::None => {
                     panic!("Group name {} registered an invalid None source", grp_name);
                 }
@@ -354,6 +357,9 @@ impl Ledger {
                 }
                 SrcId::Detector(_) => {
                     panic!("Group name {} already used for a detector sink", grp_name);
+                }
+                SrcId::SrcId(_) => {
+                    panic!("SrcId reserved as an abstract super type");
                 }
                 SrcId::None => {
                     panic!("Group name {} registered an invalid None source", grp_name);
@@ -525,6 +531,16 @@ impl Ledger {
         if self.next_surf_id >= self.next_matsurf_id {
             warn!("Surface ID and Material-Surface ID ranges are overlapping");
         }
+    }
+
+    pub fn get_src_dict(&self) -> HashMap<SrcName, SrcId> {
+        let mut src_dict = HashMap::new();
+        for (src_id, src_names) in &self.src_map {
+            for src_name in src_names {
+                src_dict.insert(src_name.clone(), src_id.clone());
+            }
+        }
+        src_dict
     }
 }
 

@@ -3,11 +3,16 @@ pub mod emission;
 pub mod mcrt;
 pub mod ledger;
 pub mod filter;
+pub mod reader;
+
+pub use crate::ledger::Ledger;
 
 use raw::{Pipeline, RawField};
 use serde::{Deserialize, Serialize};
 use std::ops::Deref;
 use log::warn;
+
+use crate::filter::BitsMatch;
 
 // =======================================
 // Traits for encoding and decoding events
@@ -49,6 +54,7 @@ pub struct EventId {
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
 pub enum SrcId {
     None,
+    SrcId(u16),
     Mat(u16),
     Surf(u16),
     MatSurf(u16),
@@ -60,6 +66,7 @@ impl std::fmt::Display for SrcId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SrcId::None        => write!(f, "None"),
+            SrcId::SrcId(id)   => write!(f, "SrcId({})", id),
             SrcId::Mat(id)     => write!(f, "Mat({})", id),
             SrcId::Surf(id)    => write!(f, "Surf({})", id),
             SrcId::MatSurf(id) => write!(f, "MatSurf({})", id),
@@ -98,12 +105,13 @@ impl RawField for SrcId {
     }
     fn encode(&self) -> u32 {
         match self {
-            SrcId::None        => 0u32,
-            SrcId::Mat(id)     => *id as u32,
-            SrcId::Surf(id)    => *id as u32,
-            SrcId::MatSurf(id) => *id as u32,
-            SrcId::Light(id)   => *id as u32,
-            SrcId::Detector(id)     => *id as u32,
+            SrcId::None         => 0u32,
+            SrcId::SrcId(id)    => *id as u32,
+            SrcId::Mat(id)      => *id as u32,
+            SrcId::Surf(id)     => *id as u32,
+            SrcId::MatSurf(id)  => *id as u32,
+            SrcId::Light(id)    => *id as u32,
+            SrcId::Detector(id) => *id as u32,
         }
     }
 }
@@ -112,12 +120,27 @@ impl Deref for SrcId {
     type Target = u16;
     fn deref(&self) -> &Self::Target {
         match self {
-            SrcId::None       => &0u16,
-            Self::Mat(id)     => id,
-            Self::Surf(id)    => id,
-            Self::MatSurf(id) => id,
-            Self::Light(id)   => id,
-            Self::Detector(id)     => id,
+            Self::None         => &0u16,
+            Self::SrcId(id)    => id,
+            Self::Mat(id)      => id,
+            Self::Surf(id)     => id,
+            Self::MatSurf(id)  => id,
+            Self::Light(id)    => id,
+            Self::Detector(id) => id,
+        }
+    }
+}
+
+impl SrcId {
+    pub fn bits_match(&self) -> BitsMatch {
+        match self {
+            SrcId::None        => BitsMatch{mask: 0, value: 0},
+            SrcId::SrcId(n)   |
+            SrcId::Mat(n)     |
+            SrcId::Surf(n)    |
+            SrcId::MatSurf(n) |
+            SrcId::Light(n)   |
+            SrcId::Detector(n) => BitsMatch{mask: 0xFFFF, value: *n as u32},
         }
     }
 }
