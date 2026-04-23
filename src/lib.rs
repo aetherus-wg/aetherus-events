@@ -51,6 +51,30 @@ pub struct EventId {
     pub src_id:     SrcId,
 }
 
+impl std::fmt::Display for EventId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.event_type {
+            EventType::None => write!(f, "None"),
+            EventType::Emission(_) => write!(f, "Emission|{:4X}", *self.src_id),
+            EventType::MCRT(mcrt) => {
+                match mcrt {
+                    mcrt::MCRT::Interface(interf) => {
+                        match interf {
+                            mcrt::Interface::Reflection => write!(f, "Reflection|{:4X}", *self.src_id),
+                            mcrt::Interface::Refraction => write!(f, "Refraction|{:4X}", *self.src_id),
+                            _ => write!(f, "Interface|{:4X}", *self.src_id),
+                        }
+                    },
+                    mcrt::MCRT::Reflector(_) => write!(f, "Reflector|{:4X}", *self.src_id),
+                    mcrt::MCRT::Material(_)  => write!(f, "Material|{:4X}", *self.src_id),
+                }
+            },
+            EventType::Detection => write!(f, "Detection|{:4X}", *self.src_id),
+            EventType::Processing => write!(f, "Processing"),
+        }
+    }
+}
+
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
 pub enum SrcId {
     None,

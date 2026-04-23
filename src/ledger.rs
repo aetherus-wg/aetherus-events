@@ -2,10 +2,10 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-use crate::SrcId;
+use crate::{Decode, SrcId};
 use crate::{Encode, EventId, RawEvent};
 use serde_json;
 use std::fs::File;
@@ -541,6 +541,32 @@ impl Ledger {
             }
         }
         src_dict
+    }
+
+    pub fn emit_dot(&self, uids: &Vec<Uid>) -> String {
+        let mut dot = String::from("digraph Ledger {\n  rankdir=LR;\n  node [shape=record];\n");
+        let mut nodes = HashSet::new();
+        let mut pairs = HashSet::new();
+
+        for uid in uids {
+            let chain_uids = self.get_chain(*uid);
+            for chain_uid in chain_uids.iter() {
+                let event = EventId::decode(chain_uid.event);
+                if !nodes.contains(chain_uid) {
+                    let event_str = format!("{}", event).replace("|", "\\|");
+                    dot.push_str(&format!("  n{:016X} [label=\"{{<l>{}|<r> {}}}\"];\n", chain_uid.encode(), chain_uid.seq_id, event_str));
+                    nodes.insert(*chain_uid);
+                }
+            }
+            for (chain_uid, chain_uid_next) in chain_uids.windows(2).map(|w| (w[0], w[1])) {
+                if !pairs.contains(&(chain_uid, chain_uid_next)) {
+                    dot.push_str(&format!("  n{:016X}:r -> n{:016X}:l\n", chain_uid.encode(), chain_uid_next.encode()));
+                    pairs.insert((chain_uid, chain_uid_next));
+                }
+            }
+        }
+        dot.push_str("}\n");
+        dot
     }
 }
 
