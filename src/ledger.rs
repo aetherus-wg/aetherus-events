@@ -1,3 +1,39 @@
+//! Event ledger for tracking photon event chains.
+//!
+//! The `Ledger` maintains a record of photon event sequences,
+//! enabling forward and backward traversal through the event tree.
+//!
+//! ## Structure
+//!
+//! Each event is identified by a `Uid` (unique identifier) containing:
+//! - `seq_id`: Sequence number in the chain
+//! - `event`: 32-bit encoded event type
+//!
+//! ## Usage
+//!
+//! ```rust
+//! use aetherus_events::{Ledger, EventId, EventType, SrcId};
+//! use aetherus_events::mcrt_event;
+//! use aetherus_events::emission::Emission;
+//!
+//! let mut ledger = Ledger::new();
+//!
+//! // Insert start event (photon emission)
+//! let start = ledger.insert_start(EventId::new(
+//!     EventType::Emission(Emission::PointSource),
+//!     SrcId::Light(1)
+//! ));
+//!
+//! // Add subsequent events
+//! let next = ledger.insert(start, EventId::new_mcrt(
+//!     mcrt_event!(Material, Elastic, Mie, Forward),
+//!     SrcId::Mat(1)
+//! ));
+//!
+//! // Get the chain
+//! let chain = ledger.get_chain(next);
+//! ```
+
 use log::warn;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
@@ -17,10 +53,18 @@ use std::hash::{Hash, Hasher};
 // Definition of Unique IDentifier (Uid) and methods/traits
 // ----------------------------------------------------
 
+/// Unique identifier for an event in the ledger.
+///
+/// Contains:
+/// - `seq_id`: Sequence position in the chain (0 = root)
+/// - `event`: 32-bit encoded event type
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Uid {
     pub seq_id: u32,
-    #[serde(serialize_with = "array_bytes::ser_hexify_prefixed", deserialize_with = "array_bytes::de_dehexify")]
+    #[serde(
+        serialize_with = "array_bytes::ser_hexify_prefixed",
+        deserialize_with = "array_bytes::de_dehexify"
+    )]
     pub event: u32, // u32 Event
 }
 
@@ -54,14 +98,14 @@ impl FromStr for Uid {
         if parts.len() != 2 {
             return Err(format!("Invalid Uid format: {}", s));
         }
-        let seq_id = parts[0].parse::<u32>()
+        let seq_id = parts[0]
+            .parse::<u32>()
             .map_err(|e| format!("Failed to parse seq_id: {}", e))?;
         let event = u32::from_str_radix(parts[1].trim_start_matches("0x"), 16)
             .map_err(|e| format!("Failed to parse event: {}", e))?;
         Ok(Uid { seq_id, event })
     }
 }
-
 
 // ----------------------------------------------------
 // Definition of the SrcId RawField,
@@ -117,7 +161,9 @@ impl Uid {
     }
 }
 
-
+/// Named source identifier for humans.
+///
+/// Associates a name with a source ID for readable output.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Hash, Eq)]
 pub enum SrcName {
     Light(String),
@@ -139,7 +185,6 @@ impl ToString for SrcName {
     }
 }
 
-
 // ----------------------------------------------------
 // Definition of Ledger struct and methods
 // ----------------------------------------------------
@@ -159,6 +204,12 @@ where
     serde_json::to_writer_pretty(file, ledger)
 }
 
+/// Event ledger for tracking photon event chains.
+///
+/// Maintains a record of all photon events with:
+/// - Source mappings (src_map): Named sources mapped to source IDs
+/// - Event chains (next/prev): Linked lists of event sequences
+/// - Start events (start_events): Root events, which have no previous event cause
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct Ledger {
@@ -180,7 +231,6 @@ pub struct Ledger {
     prev: BTreeMap<u32, Uid>,
     next_seq_id: u32,
 }
-
 
 impl Ledger {
     pub fn new() -> Self {
@@ -435,12 +485,14 @@ impl Ledger {
                 .map(|map| map.remove(&current_uid.event));
 
             if let Some(prev_uid) = self.prev.get(&current_uid.seq_id).cloned() {
-
                 bifurcate = match self.next.get(&current_uid.seq_id) {
                     Some(next_map) => next_map.len() > 0,
                     None => {
-                        panic!("Inconsistent Ledger state: missing next entry for seq_id {}", current_uid.seq_id);
-                    },
+                        panic!(
+                            "Inconsistent Ledger state: missing next entry for seq_id {}",
+                            current_uid.seq_id
+                        );
+                    }
                 };
 
                 if !bifurcate {
@@ -450,7 +502,10 @@ impl Ledger {
 
                 current_uid = prev_uid;
             } else {
-                panic!("Inconsistent Ledger state: missing prev entry for seq_id {}", current_uid.seq_id);
+                panic!(
+                    "Inconsistent Ledger state: missing prev entry for seq_id {}",
+                    current_uid.seq_id
+                );
             }
         }
     }
@@ -554,13 +609,22 @@ impl Ledger {
                 let event = EventId::decode(chain_uid.event);
                 if !nodes.contains(chain_uid) {
                     let event_str = format!("{}", event).replace("|", "\\|");
-                    dot.push_str(&format!("  n{:016X} [label=\"{{<l>{}|<r> {}}}\"];\n", chain_uid.encode(), chain_uid.seq_id, event_str));
+                    dot.push_str(&format!(
+                        "  n{:016X} [label=\"{{<l>{}|<r> {}}}\"];\n",
+                        chain_uid.encode(),
+                        chain_uid.seq_id,
+                        event_str
+                    ));
                     nodes.insert(*chain_uid);
                 }
             }
             for (chain_uid, chain_uid_next) in chain_uids.windows(2).map(|w| (w[0], w[1])) {
                 if !pairs.contains(&(chain_uid, chain_uid_next)) {
-                    dot.push_str(&format!("  n{:016X}:r -> n{:016X}:l;\n", chain_uid.encode(), chain_uid_next.encode()));
+                    dot.push_str(&format!(
+                        "  n{:016X}:r -> n{:016X}:l;\n",
+                        chain_uid.encode(),
+                        chain_uid_next.encode()
+                    ));
                     pairs.insert((chain_uid, chain_uid_next));
                 }
             }
@@ -631,15 +695,15 @@ impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::filter::BitsProperty;
-    use crate::mcrt_event;
     use crate::EventType;
     use crate::emission::Emission;
+    use crate::filter::BitsProperty;
+    use crate::mcrt_event;
     use crate::pattern;
 
     use super::*;
-    use tempfile::tempdir;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn produce_src_id() {
@@ -840,27 +904,54 @@ mod tests {
         let mut ledger = Ledger::new();
 
         // Populate ledger with non-dangling UIDs
-        let uid_0 = ledger.insert_start(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
-        let uid_1 = ledger.insert(uid_0, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
+        let uid_0 =
+            ledger.insert_start(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
+        let uid_1 = ledger.insert(
+            uid_0,
+            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
+        );
 
-        let uid_21 = ledger.insert(uid_1, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
-        let uid_22 = ledger.insert(uid_21, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
-        let uid_231 = ledger.insert(uid_22, EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
-        let uid_232 = ledger.insert(uid_22, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
-        let uid_2321 = ledger.insert(uid_232, EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+        let uid_21 = ledger.insert(
+            uid_1,
+            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
+        );
+        let uid_22 = ledger.insert(
+            uid_21,
+            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
+        );
+        let _uid_231 = ledger.insert(
+            uid_22,
+            EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)),
+        );
+        let uid_232 = ledger.insert(
+            uid_22,
+            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
+        );
+        let _uid_2321 = ledger.insert(
+            uid_232,
+            EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)),
+        );
 
-
-        let uid_31 = ledger.insert(uid_1, EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Any), SrcId::Mat(0)));
-        let uid_32 = ledger.insert(uid_31, EventId::new(EventType::Detection, SrcId::Surf(1)));
+        let uid_31 = ledger.insert(
+            uid_1,
+            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
+        );
+        let _uid_32 = ledger.insert(uid_31, EventId::new(EventType::Detection, SrcId::Surf(1)));
 
         let dangling_uids = ledger.get_dangling_uids();
         assert_eq!(dangling_uids.len(), 3, "Expected dangling UIDs");
         let dangling_lost_uids = dangling_uids
-                                  .into_iter()
-                                  .filter(|uid| BitsProperty::NoMatch(pattern!(Detection, SrcId::Surf(1))).matches(uid.event))
-                                  .collect::<Vec<_>>();
+            .into_iter()
+            .filter(|uid| {
+                BitsProperty::NoMatch(pattern!(Detection, SrcId::Surf(1))).matches(uid.event)
+            })
+            .collect::<Vec<_>>();
 
-        assert_eq!(dangling_lost_uids.len(), 2, "Expected dangling UID to be pruned");
+        assert_eq!(
+            dangling_lost_uids.len(),
+            2,
+            "Expected dangling UID to be pruned"
+        );
 
         //println!("{:?}", ledger);
 

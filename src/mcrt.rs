@@ -1,10 +1,44 @@
+//! High-level MCRT (Monte Carlo Ray Tracing) event types.
+//!
+//! This module provides idiomatic Rust enum types for MCRT events with
+//! proper encode/decode implementations to/from 32-bit raw integers.
+//!
+//! ## Hierarchy
+//!
+//! ```text
+//! MCRT
+//! ├── Interface: Reflection, Refraction, ReEmittance, Boundary
+//! ├── Reflector: Diffuse, Specular, Composite, RetroReflective
+//! └── Material
+//!     ├── Absorption
+//!     ├── Inelastic: Raman, Fluorescence
+//!     └── Elastic: HenyeyGreenstein, Mie, Rayleigh, SphericalCdf
+//! ```
+//!
+//! ## Usage
+//!
+//! Use the `mcrt_event!` macro to construct events:
+//!
+//! ```rust
+//! use aetherus_events::mcrt_event;
+//!
+//! // Simple event
+//! let event = mcrt_event!(Interface, Reflection);
+//!
+//! // Material event with scattering
+//! let event = mcrt_event!(Material, Elastic, Mie, Forward);
+//! ```
+//!
+//! See [Aetherus Event Specification](https://github.com/aetherus-wg/aetherus-events)
+//! for full encoding details.
+
 use crate::raw::{self, RawField};
-use crate::{Encode, Decode};
+use crate::{Decode, Encode};
 
 // NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
 // as some nuisances about grouping have not been resolved.
 
-
+/// MCRT (Monte Carlo Ray Tracing) event with associated source ID.
 #[derive(PartialEq, Debug)]
 pub enum MCRT {
     Interface(Interface),
@@ -12,6 +46,12 @@ pub enum MCRT {
     Material(Material),
 }
 
+/// Interface events: interaction at surface boundaries.
+///
+/// - `Reflection`: Specular reflection at an interface
+/// - `Refraction`: Refraction through an interface (Fresnel)
+/// - `ReEmittance`: Re-emittance (BRDF/BTDF) from bidirectional transport
+/// - `Boundary`: Generic boundary event
 #[derive(PartialEq, Debug)]
 pub enum Interface {
     Reflection,
@@ -20,6 +60,13 @@ pub enum Interface {
     Boundary,
 }
 
+/// Reflector events: surface reflection types.
+///
+/// - `Diffuse`: Lambertian diffuse reflection
+/// - `Specular`: Mirror-like specular
+/// - `Composite`: Combined diffuse + specular
+/// - `RetroReflective`: Retroreflection
+/// - `CompositeRetroReflective`: Combined retroreflection
 #[derive(PartialEq, Debug)]
 pub enum Reflector {
     Diffuse,
@@ -29,19 +76,26 @@ pub enum Reflector {
     CompositeRetroReflective,
 }
 
+/// Material events: volumetric interactions.
+///
+/// - `Absorption`: Photon absorbed (terminates path)
+/// - `Inelastic`: Inelastic scattering (Raman/Fluorescence)
+/// - `Elastic`: Elastic scattering (Rayleigh/Mie/HG)
 #[derive(PartialEq, Debug)]
-pub enum Material{
+pub enum Material {
     Absorption,
     Inelastic(Inelastic),
     Elastic(Elastic),
 }
 
+/// Inelastic scattering events with direction.
 #[derive(PartialEq, Debug)]
 pub enum Inelastic {
     Raman(ScatterDir),
     Fluorescence(ScatterDir),
 }
 
+/// Elastic scattering events with direction and phase function model.
 #[derive(PartialEq, Debug)]
 pub enum Elastic {
     HenyeyGreenstein(ScatterDir),
@@ -50,9 +104,16 @@ pub enum Elastic {
     SphericalCdf(ScatterDir),
 }
 
+/// Scattering direction relative to incident direction.
+///
+/// Direction is determined by scattering angle θ:
+/// - `Forward`: 0 ≤ θ < 30deg
+/// - `Side`: 30deg ≤ θ < 150deg
+/// - `Backward`: 150deg ≤ θ ≤ 180deg
+/// - `Unknown`: No constraint
 #[derive(PartialEq, Debug)]
 pub enum ScatterDir {
-    Any,
+    Unknown,
     Forward,
     Side,
     Backward,
@@ -60,7 +121,7 @@ pub enum ScatterDir {
 
 impl ScatterDir {
     pub fn new() -> Self {
-        ScatterDir::Any
+        ScatterDir::Unknown
     }
     pub fn from(theta: f64) -> Self {
         if theta < std::f64::consts::FRAC_PI_4 {
@@ -71,7 +132,7 @@ impl ScatterDir {
             ScatterDir::Backward
         }
     }
-    pub fn from_with_spec(theta: f64, intervals: [f64;4]) -> Self {
+    pub fn from_with_spec(theta: f64, intervals: [f64; 4]) -> Self {
         assert_eq!(intervals[0], 0.0);
         assert_eq!(intervals[3], std::f64::consts::PI);
 
@@ -96,7 +157,10 @@ impl Encode<u32> for MCRT {
 }
 
 impl Decode<u32> for MCRT {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let mcrt_type = raw::MCRT::decode(raw);
         match mcrt_type {
             raw::MCRT::Interface => MCRT::Interface(Interface::decode(raw)),
@@ -118,7 +182,10 @@ impl Encode<u32> for Interface {
 }
 
 impl Decode<u32> for Interface {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let interface_type = raw::Interface::decode(raw);
         match interface_type {
             raw::Interface::Reflection  => Interface::Reflection,
@@ -142,7 +209,10 @@ impl Encode<u32> for Reflector {
 }
 
 impl Decode<u32> for Reflector {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let reflect_type = raw::Reflector::decode(raw);
         match reflect_type {
             raw::Reflector::Diffuse         => Reflector::Diffuse,
@@ -165,7 +235,10 @@ impl Encode<u32> for Material {
 }
 
 impl Decode<u32> for Material {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let material_type = raw::Material::decode(raw);
         match material_type {
             raw::Material::Absorption    => Material::Absorption,
@@ -185,7 +258,10 @@ impl Encode<u32> for Inelastic {
 }
 
 impl Decode<u32> for Inelastic {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let inelastic_type = raw::Inelastic::decode(raw);
         match inelastic_type {
             raw::Inelastic::Raman        => Inelastic::Raman(ScatterDir::decode(raw)),
@@ -206,7 +282,10 @@ impl Encode<u32> for Elastic {
 }
 
 impl Decode<u32> for Elastic {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let elastic_type = raw::Elastic::decode(raw);
         match elastic_type {
             raw::Elastic::HenyeyGreenstein => Elastic::HenyeyGreenstein(ScatterDir::decode(raw)),
@@ -220,7 +299,7 @@ impl Decode<u32> for Elastic {
 impl Encode<u32> for ScatterDir {
     fn encode(&self) -> u32 {
         match self {
-            ScatterDir::Any      => raw::ScatterDir::Any.encode(),
+            ScatterDir::Unknown  => raw::ScatterDir::Unknown.encode(),
             ScatterDir::Forward  => raw::ScatterDir::Forward.encode(),
             ScatterDir::Side     => raw::ScatterDir::Side.encode(),
             ScatterDir::Backward => raw::ScatterDir::Backward.encode(),
@@ -229,10 +308,13 @@ impl Encode<u32> for ScatterDir {
 }
 
 impl Decode<u32> for ScatterDir {
-    fn decode(raw: u32) -> Self where Self: Sized {
+    fn decode(raw: u32) -> Self
+    where
+        Self: Sized,
+    {
         let dir_type = raw::ScatterDir::decode(raw);
         match dir_type {
-            raw::ScatterDir::Any      => ScatterDir::Any,
+            raw::ScatterDir::Unknown  => ScatterDir::Unknown,
             raw::ScatterDir::Forward  => ScatterDir::Forward,
             raw::ScatterDir::Side     => ScatterDir::Side,
             raw::ScatterDir::Backward => ScatterDir::Backward,
@@ -253,7 +335,9 @@ macro_rules! mcrt_event {
         $crate::mcrt::MCRT::$subtype($crate::mcrt::$subtype::$sstype)
     };
     ($stype:ident, $sstype:ident, $ssstype:ident, $dirtype:ident) => {
-        $crate::mcrt::MCRT::$stype($crate::mcrt::$stype::$sstype($crate::mcrt::$sstype::$ssstype($crate::mcrt::ScatterDir::$dirtype)))
+        $crate::mcrt::MCRT::$stype($crate::mcrt::$stype::$sstype(
+            $crate::mcrt::$sstype::$ssstype($crate::mcrt::ScatterDir::$dirtype),
+        ))
     };
 }
 
@@ -264,8 +348,11 @@ mod tests {
     fn mcrt_event_macro() {
         let event1 = mcrt_event!(Interface, Reflection);
         assert_eq!(event1, MCRT::Interface(Interface::Reflection));
-        let event2 = mcrt_event!(Material, Elastic, Mie, Any);
-        assert_eq!(event2, MCRT::Material(Material::Elastic(Elastic::Mie(ScatterDir::Any))));
+        let event2 = mcrt_event!(Material, Elastic, Mie, Unknown);
+        assert_eq!(
+            event2,
+            MCRT::Material(Material::Elastic(Elastic::Mie(ScatterDir::Unknown)))
+        );
     }
 
     #[test]
@@ -280,27 +367,21 @@ mod tests {
             MCRT::Reflector(Reflector::RetroReflective),
             MCRT::Material(Material::Absorption),
             MCRT::Material(Material::Inelastic(Inelastic::Raman(ScatterDir::Side))),
-            MCRT::Material(Material::Inelastic(Inelastic::Fluorescence(ScatterDir::Forward))),
-            MCRT::Material(Material::Elastic(Elastic::HenyeyGreenstein(ScatterDir::Backward))),
+            MCRT::Material(Material::Inelastic(Inelastic::Fluorescence(
+                ScatterDir::Forward,
+            ))),
+            MCRT::Material(Material::Elastic(Elastic::HenyeyGreenstein(
+                ScatterDir::Backward,
+            ))),
             MCRT::Material(Material::Elastic(Elastic::Mie(ScatterDir::Backward))),
             MCRT::Material(Material::Elastic(Elastic::Rayleigh(ScatterDir::Backward))),
-            MCRT::Material(Material::Elastic(Elastic::SphericalCdf(ScatterDir::Backward))),
+            MCRT::Material(Material::Elastic(Elastic::SphericalCdf(
+                ScatterDir::Backward,
+            ))),
         ];
         let enc_list = vec![
-            0x03000001,
-            0x03010002,
-            0x03040003,
-            0x03420004,
-            0x03440005,
-            0x03460006,
-            0x03480007,
-            0x03800008,
-            0x03920009,
-            0x0395000a,
-            0x03a3000b,
-            0x03a7000c,
-            0x03ab000d,
-            0x03af000e,
+            0x03000001, 0x03010002, 0x03040003, 0x03420004, 0x03440005, 0x03460006, 0x03480007,
+            0x03800008, 0x03920009, 0x0395000a, 0x03a3000b, 0x03a7000c, 0x03ab000d, 0x03af000e,
         ];
         for (enc, dec) in enc_list.iter().zip(dec_list.iter()) {
             let decoded_event = MCRT::decode(*enc);

@@ -1,47 +1,82 @@
+//! Event filtering using bitmask matching.
+//!
+//! This module provides filtering capabilities for event chains,
+//! allowing selection of events based on bitpattern matching.
+//!
+//! ## Filtering Scheme
+//!
+//! Events are filtered using bit masks to match specific fields:
+//! - Pipeline mask matches pipeline type (bits 24-27)
+//! - SuperType mask matches MCRT category (bits 22-23)
+//! - SubType mask matches specific event type (bits 16-21)
+//! - SourceID mask matches material/surface ID (bits 0-15)
+//!
+//! ## Usage
+//!
+//! ```rust
+//! use aetherus_events::filter::{BitsMatch, BitsProperty};
+//!
+//! // Match all Material events from Mat(ID=1)
+//! let matcher = BitsProperty::Match(BitsMatch::new(0x00FF0001, 0x03800001));
+//! let matches = matcher.matches(0x03800001); // true
+//! ```
+//!
+//! See module-level docs for more examples.
+
+//! Defines a filtering scheme that can be composed by concatenation of various fields in the event
+//! bitfield description.
+//!
+//! ## Examples - Pseudocode
+//! <div class="warning">The following is not supported syntax,
+//! but it was the driving force to develop an external DSL!</div>
+//!
+//! 1. We could filter for all Scattering Events coming from a specific material with MatId as such
+//! ` filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)`
+//!
+//! 2. Filter for all interactions with objects that have SurfId(x) or MatId(x) described by
+//!    MatSurfId(x)
+//! `filter_seq!(MCRT|*|*|MatSurfId)`
+//!
+//! 3. Filter for events that have N number of interactions described by
+//! `
+//! use aetherus_events::filter_seq;
+//! filter_seq!([MCRT|Interface|Refraction|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId, ... ]);
+//! `
+//!
+//! 4. Filter for permutations of events
+//! `
+//! filter_seq!(perm![ MCRT|Interface|*|SurfId,
+//!                    MCRT|Material|{Elastic, Inelastic}|*|*|MatId,
+//!                    ... ])
+//! `
+
+//! ## Building patterns for filtering
+//! As an internal DSL we would like to construct patterns as follows,
+//! but this was superseeded by the external DSL `Eldritch-Trace`
+//!
+//! Macro to create a filter specification using pipe-delimited syntax
+//! Single event filter:
+//! ```ignore
+//! filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)
+//! ```
+//!
+//! Sequence of events:
+//! ```ignore
+//! filter_seq!([MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId])
+//! ```
+//!
+//! Permutation (any order):
+//! ```ignore
+//! filter_perm![MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId]
+//! ```
+use crate::ledger::{Ledger, Uid};
 use std::collections::VecDeque;
 use std::fmt;
-/// Define a filtering scheme that can be composed by concatenation of various fields in the event
-/// bitfield description.
-///
-/// # Examples
-///
-/// 1. We could filter for all Scattering Events coming from a specific material with MatId as such
-/// ` filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)`
-///
-/// 2. Filter for all interactions with objects that have SurfId(x) or MatId(x) described by
-///    MatSurfId(x)
-/// `filter_seq!(MCRT|*|*|MatSurfId)`
-///
-/// 3. Filter for events that have N number of interactions described by
-/// `
-/// use aetherus_events::filter_seq;
-/// filter_seq!([MCRT|Interface|Refraction|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId, ... ]);
-/// `
-///
-/// 4. Filter for permutations of events
-/// `
-/// filter_seq!(perm![ MCRT|Interface|*|SurfId,
-///                    MCRT|Material|{Elastic, Inelastic}|*|*|MatId,
-///                    ... ])
-/// `
 
-/// Macro to create a filter specification using pipe-delimited syntax
-/// Single event filter:
-/// ```ignore
-/// filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)
-/// ```
+/// Bitmask matcher for event filtering.
 ///
-/// Sequence of events:
-/// ```ignore
-/// filter_seq!([MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId])
-/// ```
-///
-/// Permutation (any order):
-/// ```ignore
-/// filter_perm![MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId]
-/// ```
-use crate::ledger::{Ledger, Uid};
-
+/// Contains a mask and value to match against event bits using:
+/// `(event & mask) == value`
 #[derive(Clone, Copy)]
 pub struct BitsMatch {
     pub mask: u32,
@@ -52,12 +87,19 @@ impl BitsMatch {
         BitsMatch { mask, value }
     }
     pub fn from_event(event: u32) -> Self {
-        BitsMatch { mask: 0xFFFFFFFF, value: event }
+        BitsMatch {
+            mask: 0xFFFFFFFF,
+            value: event,
+        }
     }
 }
 impl fmt::Debug for BitsMatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "BitsMatch {{ mask: 0x{:08X}, value: 0x{:08X} }}", self.mask, self.value)
+        write!(
+            f,
+            "BitsMatch {{ mask: 0x{:08X}, value: 0x{:08X} }}",
+            self.mask, self.value
+        )
     }
 }
 
@@ -76,12 +118,8 @@ impl Default for BitsProperty {
 impl BitsProperty {
     pub fn matches(&self, event: u32) -> bool {
         match self {
-            BitsProperty::Match(bits_match) => {
-                (event & bits_match.mask) == bits_match.value
-            },
-            BitsProperty::NoMatch(bits_match) => {
-                (event & bits_match.mask) != bits_match.value
-            },
+            BitsProperty::Match(bits_match) => (event & bits_match.mask) == bits_match.value,
+            BitsProperty::NoMatch(bits_match) => (event & bits_match.mask) != bits_match.value,
         }
     }
 }
@@ -110,14 +148,17 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
             }
         } else {
             let next_uids = ledger.get_next(&uid_seq.uid);
-            assert!(next_uids.len() > 0, "No more subsequent events for UID: {}", uid_seq.uid);
+            assert!(
+                next_uids.len() > 0,
+                "No more subsequent events for UID: {}",
+                uid_seq.uid
+            );
             for next_uid in next_uids {
                 if uid_seq.bits_property_seq.is_empty() {
                     seq_queue.push_back(SeqQueueEntry {
                         uid: next_uid,
-                        bits_property_seq: uid_seq.bits_property_seq.clone()
+                        bits_property_seq: uid_seq.bits_property_seq.clone(),
                     });
-
                 } else {
                     let bits_property = uid_seq.bits_property_seq.front().unwrap();
                     let mut new_bits_property_seq = uid_seq.bits_property_seq.clone();
@@ -127,7 +168,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
                     }
                     seq_queue.push_back(SeqQueueEntry {
                         uid: next_uid,
-                        bits_property_seq: new_bits_property_seq
+                        bits_property_seq: new_bits_property_seq,
                     });
                 }
             }
@@ -296,7 +337,7 @@ macro_rules! filter_mcrt_seq {
     ($event_type:ident, $src_id:expr) => {
         if ($src_id != SrcId::None) {
             assert!(
-                matches!($src_id, SrcId::Mat(_)| SrcId::Surf(_) | SrcId::MatSurf(_)),
+                matches!($src_id, SrcId::Mat(_) | SrcId::Surf(_) | SrcId::MatSurf(_)),
                 "MCRT events can only be filtered by MatId, SurfId, or MatSurfId"
             );
         }
@@ -359,7 +400,10 @@ macro_rules! filter_emit_seq {
     // 1. Generic EventType: filter_seq!(Pipeline::MCRT | EventType | SrcId)
     ($src_id:expr) => {{
         if $src_id != SrcId::None {
-            assert!(matches!($src_id,  SrcId::Light(_)), "Emission events can only be filtered by LightId");
+            assert!(
+                matches!($src_id, SrcId::Light(_)),
+                "Emission events can only be filtered by LightId"
+            );
 
             (SrcId::mask(), *$src_id as u32)
         } else {
@@ -368,7 +412,10 @@ macro_rules! filter_emit_seq {
     }};
     ($event_type:tt, $src_id:expr) => {{
         if $src_id != SrcId::None {
-            assert!(matches!($src_id,  SrcId::Light(_)), "Emission events can only be filtered by LightId");
+            assert!(
+                matches!($src_id, SrcId::Light(_)),
+                "Emission events can only be filtered by LightId"
+            );
 
             (SrcId::mask(), *$src_id as u32)
         } else {
@@ -378,9 +425,12 @@ macro_rules! filter_emit_seq {
     ($supertype:ident, $subtype:ident, $src_id:expr) => {{
         use $crate::SrcId;
         if $src_id != SrcId::None {
-            assert!(matches!($src_id, SrcId::Light(_)), "Emission events can only be filtered by LightId");
+            assert!(
+                matches!($src_id, SrcId::Light(_)),
+                "Emission events can only be filtered by LightId"
+            );
 
-            (SrcId::mask(), *$src_id as u32 )
+            (SrcId::mask(), *$src_id as u32)
         } else {
             (0, 0)
         }
@@ -404,9 +454,7 @@ macro_rules! filter_detect_seq {
         // TODO: Complete implementation and SrcId::Detector
         (0, 0)
     };
-    ($supertype:ident, $subtype:ident, $src_id:expr) => {{
-        (0, 0)
-    }};
+    ($supertype:ident, $subtype:ident, $src_id:expr) => {{ (0, 0) }};
     ($supertype:ident, $subtype:ident, $scatter:ident, $dir:ident, $src_id:expr) => {
         (0, 0)
     };
@@ -415,7 +463,7 @@ macro_rules! filter_detect_seq {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventId, SrcId, EventType};
+    use crate::{EventId, EventType, SrcId};
 
     #[test]
     fn test_find_dangling_uids_empty_ledger() {
@@ -423,7 +471,10 @@ mod tests {
         let bits_property = BitsProperty::default(); // Assuming BitsProperty has a `default` method
 
         let result = find_dangling_uids(&ledger, bits_property);
-        assert!(result.is_empty(), "Expected no dangling UIDs in an empty ledger");
+        assert!(
+            result.is_empty(),
+            "Expected no dangling UIDs in an empty ledger"
+        );
     }
 
     #[test]
@@ -454,6 +505,5 @@ mod tests {
 
         let result = find_dangling_uids(&ledger, bits_property);
         assert_eq!(result.len(), 1, "Expected exactly one dangling UIDs");
-
     }
 }

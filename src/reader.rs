@@ -1,10 +1,17 @@
-use std::{error::Error, io::Read};
+//! CSV and JSON file reading utilities.
+//!
+//! Provides functions to read photon event data from files:
+//! - `read_ledger`: Load a `Ledger` from JSON file
+//! - `read_csv`: Load photon records from CSV file
+
 use std::fs::File;
+use std::io::Read;
 
 use serde::{Deserialize, Serialize};
 
 use crate::Ledger;
 
+/// Read a `Ledger` from a JSON file.
 pub fn read_ledger(path: &std::path::Path) -> std::io::Result<Ledger> {
     let file = File::open(path)?;
     let json_data = {
@@ -18,6 +25,14 @@ pub fn read_ledger(path: &std::path::Path) -> std::io::Result<Ledger> {
 }
 
 #[derive(Deserialize, Serialize)]
+/// Photon record from CSV file.
+///
+/// Contains position, direction, and properties for each photon:
+/// - Position (pos_x, pos_y, pos_z)
+/// - Direction (dir_x, dir_y, dir_z)
+/// - Physical properties (wavelength, power, tof)
+/// - MC simulation properties (weight)
+/// - UID reference (uid, encoded as u64)
 pub struct CsvRecord {
     pub pos_x: f64,
     pub pos_y: f64,
@@ -29,7 +44,10 @@ pub struct CsvRecord {
     pub power: f64,
     pub weight: f64,
     pub tof: f64,
-    #[serde(serialize_with = "array_bytes::ser_hexify", deserialize_with = "array_bytes::de_dehexify")]
+    #[serde(
+        serialize_with = "array_bytes::ser_hexify",
+        deserialize_with = "array_bytes::de_dehexify"
+    )]
     pub uid: u64,
 }
 
