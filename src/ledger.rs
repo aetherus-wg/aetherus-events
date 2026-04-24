@@ -560,7 +560,7 @@ impl Ledger {
             }
             for (chain_uid, chain_uid_next) in chain_uids.windows(2).map(|w| (w[0], w[1])) {
                 if !pairs.contains(&(chain_uid, chain_uid_next)) {
-                    dot.push_str(&format!("  n{:016X}:r -> n{:016X}:l\n", chain_uid.encode(), chain_uid_next.encode()));
+                    dot.push_str(&format!("  n{:016X}:r -> n{:016X}:l;\n", chain_uid.encode(), chain_uid_next.encode()));
                     pairs.insert((chain_uid, chain_uid_next));
                 }
             }

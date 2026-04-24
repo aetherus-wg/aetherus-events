@@ -232,5 +232,64 @@ The rules described below are loose, but are desirable to be implement in order 
 I) Use the same ID for Material and Surface of the same object, hence, there will be a single ID to query for in the `MatSurfID` if photons interacted with certain object at all.  
 II) Group together multiple objects to map to the same ID if it's not necessary to separate them, as it will make filtering easier. Then the Surface and Material HashMaps will have multiple entries mapping to the same `MatSurfID`. This could be of interest for multiple objects that compose the far-field objects that are not interest in the scene.
 
+## Filtering DSL
 
-(
+Using BNF, EBNF or parsing expression grammar (PEG), we want to describe the
+syntax of the DSL that helps us easily describe filtering rules for our detected
+photons.
+
+Resources
+- [BNF and EBNF playground](https://bnfplayground.pauliankline.com/) to describe
+  context-free grammar for our parser
+- [Pest using PEG with palyground](https://pest.rs/)
+- [PEG parsers
+description](https://we-like-parsers.github.io/pegen/peg_parsers.html)
+- [Excelent rundown of
+DSLs](https://martinfowler.com/articles/languageWorkbench.html)
+
+```
+```
+```
+<program> ::= <statement> | <statement> <NEWLINE> <program>
+<statement> ::= <field_decl> | <pattern_decl> | <seq_decl> | <comment>
+<comment> ::= "#" ( [1-9] | [a-z] )+
+
+<field_decl> ::= "field" <WHITESPACE> <ident> ":" <WHITESPACE>* <field_gen_ident>
+<pattern_decl> ::= "pattern" <WHITESPACE> <ident> ":" <WHITESPACE>* <pattern_body>
+<seq_decl> ::= "sequence" <WHITESPACE> <ident> ":" <WHITESPACE>* <NEWLINE>? <seq_body>
+
+<src_gen_field> ::= <src_field> | "Any[" <WHITESPACE>* <src_field_list> <WHITESPACE>* "]"
+<src_field_list> ::= <src_field> | <src_field> <SEPARATOR> <src_field_list>
+<src_field> ::= <src_ident> "(" ( ("\"" <src_name> "\"") | <src_id>) ")"
+<src_name> ::= <LETTER> ( <LETTER> | <DIGIT> | "_" )*
+<src_id> ::= [0-9]+ | <src_id_hex>
+<src_id_hex> ::= "0x" <HEX_DIGIT> <HEX_DIGIT> <HEX_DIGIT> <HEX_DIGIT>
+<src_ident> ::= "Mat" | "Surf" | "MatSurf" | "Light" | "Detector"
+
+<pattern_body> ::= "|" <WHITESPACE>* <pipeline_id> <CONCAT> <pattern_event> <CONCAT> <src_field> <WHITESPACE>* "|"
+<pipeline_id> ::= "MCRT" | "Emission" | "Detection"
+<pattern_event> ::= <pattern_token> | <pattern_token> <CONCAT> <pattern_event>
+<pattern_token> ::= <field_gen_ident> | "*" | <ident>
+
+<field_gen_ident> ::= <field_ident> | "Any[" <WHITESPACE>* <field_ident_list> <WHITESPACE>* "]"
+<field_ident_list> ::= <field_ident> | <field_ident> <SEPARATOR> <field_ident_list>
+<field_ident> ::= "Material" | "Interface" | "Reflector" | "Refraction" | "Reflection" | "Elastic" | "Inelastic" | <field_refl_ident> | <field_scat_ident> | <field_dir_ident>
+<field_dir_ident> ::= "Dir::Forward" | "Dir::Backward" | "Dir::Side" | "Dir::Any"
+<field_refl_ident> ::= "Diffuse" | "Specular" | "Composite"
+<field_scat_ident> ::= "Mie" | "Rayleigh" | "Henyey-Greenstein"
+
+<seq_body> ::= <SEQ_TYPE> (<pattern_body> | <ident>) | <SEQ_TYPE> (<pattern_body> | <ident>) <NEWLINE> <seq_body>
+
+
+<SEQ_TYPE> ::= E | "!" | ([1-9] [0-9]*) | "N"
+<ident> ::= <LETTER> ( <LETTER> | <DIGIT> | "_" )*
+<LETTER> ::= [a-z] | [A-Z]
+<DIGIT> ::= [0-9]
+<WHITESPACE> ::= " "
+<NEWLINE> ::= "\n" | "\r\n"
+<HEX_DIGIT> ::= [0-9] | [a-f] | [A-F]
+<CONCAT> ::= <WHITESPACE>* "|" <WHITESPACE>*
+<SEPARATOR> ::= <WHITESPACE>* "," <WHITESPACE>*
+```
+```
+```

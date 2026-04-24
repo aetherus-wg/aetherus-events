@@ -1,57 +1,26 @@
-use std::fs::File;
-use std::io::Read;
 use std::path::PathBuf;
-use std::error::Error;
 
-use serde::{Deserialize, Serialize};
+use aetherus_events::reader::CsvRecord;
+use aetherus_events::reader::read_csv;
+use aetherus_events::reader::read_ledger;
 
-use aetherus_events::{pattern, ledger::Ledger};
+use aetherus_events::pattern;
 use aetherus_events::SrcId;
 use aetherus_events::filter::{find_forward_uid_seq, BitsProperty};
 
-#[derive(Deserialize, Serialize)]
-struct CsvRecord {
-    pos_x: f64,
-    pos_y: f64,
-    pos_z: f64,
-    dir_x: f64,
-    dir_y: f64,
-    dir_z: f64,
-    wavelength: f64,
-    power: f64,
-    weight: f64,
-    tof: f64,
-    #[serde(serialize_with = "array_bytes::ser_hexify", deserialize_with = "array_bytes::de_dehexify")]
-    uid: u64,
-}
-
-fn read_csv(file_path: &str) -> Result<Vec<CsvRecord>, Box<dyn Error>> {
-    let file = File::open(file_path)?;
-    let mut rdr = csv::Reader::from_reader(file);
-    let mut records = Vec::new();
-
-    for result in rdr.deserialize() {
-        let record: CsvRecord = result?;
-        records.push(record);
-    }
-
-    Ok(records)
-}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let ledger_path = args[1].parse::<PathBuf>().unwrap();
 
-    let file = File::open(ledger_path).expect("Unable to create file");
-    let json_data = {
-        let mut buf_reader = std::io::BufReader::new(file);
-        let mut contents = String::new();
-        buf_reader
-            .read_to_string(&mut contents)
-            .expect("Unable to read ledger file");
-        contents
+    let ledger = read_ledger(&ledger_path).expect("Unable to read ledger file");
+
+    let csv_path = args.get(2).map(|s| s.parse::<PathBuf>().unwrap());
+    let phot_records = if let Some(ref csv_path) = csv_path {
+        read_csv(&csv_path).expect("Unable to read CSV file")
+    } else {
+        Vec::new()
     };
-    let ledger: Ledger = serde_json::from_str(&json_data).expect("Unable to parse ledger file");
 
     let filter_seq = vec![
         pattern!(MCRT,      Interface, Refraction,                    SrcId::Surf(0xFFFF)),
@@ -65,13 +34,6 @@ fn main() {
     for uid in uids.clone() {
         println!("Found UID: {}", uid);
     }
-
-    let csv_path = args.get(2).map(|s| s.parse::<PathBuf>().unwrap());
-    let phot_records = if let Some(csv_path) = csv_path.clone() {
-        read_csv(csv_path.to_str().unwrap()).expect("Unable to read CSV file")
-    } else {
-        Vec::new()
-    };
 
     let hex_uids = uids.iter()
         .map(|uid| uid.encode())
