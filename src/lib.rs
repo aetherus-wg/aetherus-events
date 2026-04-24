@@ -2,7 +2,7 @@
 //!
 //! This library provides an event encoding and tracking system for LIDAR photon modeling,
 //! based on the Aetherus event specification. It defines pipelines for Emission, MCRT (Monte Carlo
-//! Ray Tracing), Detection, and Processing stages.
+//! Radiative Transfer), Detection, and Processing stages.
 //!
 //! ## Encoding Scheme
 //!

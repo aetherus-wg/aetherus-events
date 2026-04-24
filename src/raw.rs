@@ -18,7 +18,7 @@
 //! ## Pipeline Codes
 //!
 //! - `1`: Emission (light source events)
-//! - `3`: MCRT (Monte Carlo Ray Tracing)
+//! - `3`: MCRT (Monte Carlo Radiative Transfer)
 //! - `5`: Detection (photon detection)
 //! - `7`: Processing (post-processing)
 

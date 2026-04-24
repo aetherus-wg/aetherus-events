@@ -1,4 +1,4 @@
-//! High-level MCRT (Monte Carlo Ray Tracing) event types.
+//! High-level MCRT (Monte Carlo Radiative Transfer) event types.
 //!
 //! This module provides idiomatic Rust enum types for MCRT events with
 //! proper encode/decode implementations to/from 32-bit raw integers.
@@ -38,7 +38,7 @@ use crate::{Decode, Encode};
 // NOTE: To simplify implementation for now, we will restrict to not allow MatSurf for now,
 // as some nuisances about grouping have not been resolved.
 
-/// MCRT (Monte Carlo Ray Tracing) event with associated source ID.
+/// MCRT (Monte Carlo Radiative Transfer) event with associated source ID.
 #[derive(PartialEq, Debug)]
 pub enum MCRT {
     Interface(Interface),
