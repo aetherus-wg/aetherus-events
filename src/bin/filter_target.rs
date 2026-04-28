@@ -23,15 +23,15 @@ fn main() {
 
     //let filter_seq = vec![
     //    pattern!(MCRT,      Interface, Refraction,                    SrcId::Surf(0xFFFF)),
-    //    pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Any, SrcId::Mat(0xFFFF)),
+    //    pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Unknown, SrcId::Mat(0xFFFF)),
     //    pattern!(Detection,                                           SrcId::None),
     //].into_iter().map(|bits_match| BitsProperty::Match(bits_match)).collect();
     //
     // Seawater scatter
     //let filter_seq = vec![
-    //    pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Any, SrcId::Mat(3)),
-    //    //pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Any, SrcId::MatSurf(65535)),
-    //    //pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Any, SrcId::MatSurf(65533)),
+    //    pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Unknown, SrcId::Mat(3)),
+    //    //pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Unknown, SrcId::MatSurf(65535)),
+    //    //pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Unknown, SrcId::MatSurf(65533)),
     //    //pattern!(MCRT, Reflector, Specular, SrcId::Surf(0)),
     //    pattern!(Detection,                                           SrcId::None),
     //].into_iter().map(|bits_match| BitsProperty::Match(bits_match)).collect();
@@ -57,7 +57,7 @@ fn main() {
     // Glass only
     //let filter_seq = vec![
     //    //BitsProperty::Match(pattern!(MCRT,      Interface, Refraction,                    SrcId::Surf(0xFFFF))),
-    //    BitsProperty::Match(pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Any, SrcId::Surf(0xFFFF))),
+    //    BitsProperty::Match(pattern!(MCRT,      Material, Elastic, HenyeyGreenstein, Unknown, SrcId::Surf(0xFFFF))),
     //    BitsProperty::NoMatch(pattern!(MCRT,      Reflector, Specular,                    SrcId::Surf(0))),
     //    BitsProperty::NoMatch(pattern!(MCRT,      Reflector, Specular,                    SrcId::Surf(1))),
     //    BitsProperty::Match(pattern!(Detection,                                           SrcId::None)),
