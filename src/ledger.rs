@@ -49,6 +49,8 @@ use std::fs::File;
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 
+use thousands::Separable;
+
 // ----------------------------------------------------
 // Definition of Unique IDentifier (Uid) and methods/traits
 // ----------------------------------------------------
@@ -598,10 +600,22 @@ impl Ledger {
         src_dict
     }
 
-    pub fn emit_dot(&self, uids: &Vec<Uid>) -> String {
+    pub fn emit_dot<'a, I>(&self, uids: I) -> String
+    where
+        I: IntoIterator<Item = &'a Uid>,
+    {
+        self.emit_dot_with_freq(uids, &HashMap::new())
+    }
+
+    pub fn emit_dot_with_freq<'a, I>(&self, uids: I, freq_dict: &HashMap<Uid, usize>) -> String
+    where
+        I: IntoIterator<Item = &'a Uid>,
+    {
         let mut dot = String::from("digraph Ledger {\n  rankdir=LR;\n  node [shape=record];\n");
         let mut nodes = HashSet::new();
         let mut pairs = HashSet::new();
+
+        let with_cnt = !freq_dict.is_empty();
 
         for uid in uids {
             let chain_uids = self.get_chain(*uid);
@@ -609,12 +623,22 @@ impl Ledger {
                 let event = EventId::decode(chain_uid.event);
                 if !nodes.contains(chain_uid) {
                     let event_str = format!("{}", event).replace("|", "\\|");
-                    dot.push_str(&format!(
-                        "  n{:016X} [label=\"{{<l>{}|<r> {}}}\"];\n",
-                        chain_uid.encode(),
-                        chain_uid.seq_id,
-                        event_str
-                    ));
+                    if with_cnt && let Some(cnt) = freq_dict.get(&chain_uid) {
+                        dot.push_str(&format!(
+                            "  n{:016X} [label=\"{{<l>{}|{}|<r>cnt({})}}\"];\n",
+                            chain_uid.encode(),
+                            chain_uid.seq_id,
+                            event_str,
+                            cnt.separate_with_commas(),
+                        ));
+                    } else {
+                        dot.push_str(&format!(
+                            "  n{:016X} [label=\"{{<l>{}|<r>{}}}\"];\n",
+                            chain_uid.encode(),
+                            chain_uid.seq_id,
+                            event_str,
+                        ));
+                    }
                     nodes.insert(*chain_uid);
                 }
             }
