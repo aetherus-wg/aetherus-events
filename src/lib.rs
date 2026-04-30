@@ -120,6 +120,12 @@ impl std::fmt::Display for EventId {
     }
 }
 
+impl Into<u32> for EventId {
+    fn into(self) -> u32 {
+        self.encode()
+    }
+}
+
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
 pub enum SrcId {
     None,

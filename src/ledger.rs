@@ -438,8 +438,8 @@ impl Ledger {
         src_id
     }
 
-    pub fn insert_start(&mut self, start_event: EventId) -> Uid {
-        let uid = Uid::new(0, start_event.encode());
+    pub fn insert_start(&mut self, start_event: impl Into<u32>) -> Uid {
+        let uid = Uid::new(0, start_event.into());
 
         if self.insert_entry(uid.clone(), 1) {
             self.start_events.push(uid.clone());
@@ -454,7 +454,7 @@ impl Ledger {
 
     // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
     // happen unless the simulation scene is extremely complex
-    pub fn insert(&mut self, prev_event: Uid, event: EventId) -> Uid {
+    pub fn insert(&mut self, prev_event: Uid, event: impl Into<u32>) -> Uid {
         // Push a new entry in next with the new_event UID if it doesn't exist already and
         //    set count to 1
         // Obs: seq_id=0 is reserved for root identification, hence all new events with no
@@ -464,7 +464,7 @@ impl Ledger {
             .ok_or("Previous event not found in ledger")
             .unwrap();
 
-        let uid = Uid::new(next_seq_id, event.encode());
+        let uid = Uid::new(next_seq_id, event.into());
 
         // FIXME: This is the only portion of the Ledger that needs to be accessed concurently.
         // Then we should encapsulate this section to run it atomically, then the Ledger can
