@@ -30,7 +30,7 @@ jobs:
       - name: Report
         run: |
           bencher run \
-          --project aetherus-wg-eldritch-events \
+          --project $(echo "${{ github.repository }}" | sed 's/\//-/g') \
           --branch "$GITHUB_REF_NAME" \
           --testbed ubuntu-latest \
           --threshold-measure latency \
