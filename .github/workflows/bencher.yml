@@ -10,6 +10,8 @@ on:
      - '**/*.rs'
      - '**/Cargo.toml'
      - 'benches/**'
+     - '.github/workflows/bencher.yml'
+
   pull_request:
       types: [opened, reopened, edited, synchronize]
   workflow_dispatch:
