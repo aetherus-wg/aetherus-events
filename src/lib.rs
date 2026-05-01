@@ -56,9 +56,12 @@ pub mod ledger;
 pub mod read;
 pub mod filter;
 
-use raw::Pipeline;
+pub use crate::ledger::Ledger;
+pub use crate::src::SrcId;
+pub use crate::event::{EventType, EventId};
+pub use crate::uid::Uid;
 
-use crate::event::EventId;
+use crate::raw::Pipeline;
 
 // =======================================
 // Traits for encoding and decoding events
