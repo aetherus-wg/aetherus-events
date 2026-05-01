@@ -9,7 +9,8 @@ use std::io::Read;
 
 use serde::{Deserialize, Serialize};
 
-use crate::Ledger;
+use crate::ledger::Ledger;
+
 
 /// Read a `Ledger` from a JSON file.
 pub fn read_ledger(path: &std::path::Path) -> std::io::Result<Ledger> {

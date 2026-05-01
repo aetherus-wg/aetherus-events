@@ -69,7 +69,8 @@
 //! ```ignore
 //! filter_perm![MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId]
 //! ```
-use crate::ledger::{Ledger, Uid};
+use crate::ledger::Ledger;
+use crate::uid::Uid;
 use std::collections::VecDeque;
 use std::fmt;
 
@@ -423,7 +424,7 @@ macro_rules! filter_emit_seq {
         }
     }};
     ($supertype:ident, $subtype:ident, $src_id:expr) => {{
-        use $crate::SrcId;
+        use $crate::src::SrcId;
         if $src_id != SrcId::None {
             assert!(
                 matches!($src_id, SrcId::Light(_)),
@@ -463,7 +464,7 @@ macro_rules! filter_detect_seq {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventId, EventType, SrcId};
+    use crate::{EventId, event::EventType, src::SrcId};
 
     #[test]
     fn test_find_dangling_uids_empty_ledger() {

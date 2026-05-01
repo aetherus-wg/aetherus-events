@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use rand::{RngExt, SeedableRng};
 use std::{
-    collections::HashSet,
     env, fs,
     hint::black_box,
     path::{Path, PathBuf},
@@ -12,7 +11,8 @@ use std::{
 };
 use tar::Archive;
 
-use aetherus_events::{Ledger, ledger::Uid, reader::read_ledger};
+use aetherus_events::prelude::*;
+use aetherus_events::read::read_ledger;
 
 fn get_benches_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());

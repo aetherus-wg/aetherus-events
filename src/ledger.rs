@@ -12,9 +12,9 @@
 //! ## Usage
 //!
 //! ```rust
-//! use aetherus_events::{Ledger, EventId, EventType, SrcId};
+//! use aetherus_events::prelude::*;
 //! use aetherus_events::mcrt_event;
-//! use aetherus_events::emission::Emission;
+//! use aetherus_events::event::Emission;
 //!
 //! let mut ledger = Ledger::new();
 //!
@@ -39,129 +39,19 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::collections::{HashMap, HashSet};
-use std::str::FromStr;
 
-use crate::{Decode, SrcId};
-use crate::{Encode, EventId, RawEvent};
+use crate::Decode;
+use crate::EventId;
+use crate::src::SrcId;
+use crate::uid::Uid;
+
 use serde_json;
 use std::fs::File;
 
 use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 use thousands::Separable;
-
-// ----------------------------------------------------
-// Definition of Unique IDentifier (Uid) and methods/traits
-// ----------------------------------------------------
-
-/// Unique identifier for an event in the ledger.
-///
-/// Contains:
-/// - `seq_id`: Sequence position in the chain (0 = root)
-/// - `event`: 32-bit encoded event type
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Uid {
-    pub seq_id: u32,
-    #[serde(
-        serialize_with = "array_bytes::ser_hexify_prefixed",
-        deserialize_with = "array_bytes::de_dehexify"
-    )]
-    pub event: u32, // u32 Event
-}
-
-impl Hash for Uid {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.encode().hash(state);
-    }
-}
-
-impl std::fmt::Debug for Uid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Uid(seq_id: {}, event: 0x{:08X})",
-            self.seq_id, self.event
-        )
-    }
-}
-
-impl std::fmt::Display for Uid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}, 0x{:08X}", self.seq_id, self.event)
-    }
-}
-
-impl FromStr for Uid {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split(", ").collect();
-        let s = s.trim_start_matches("0x");
-        if parts.len() != 2 {
-            return Err(format!("Invalid Uid format: {}", s));
-        }
-        let seq_id = parts[0]
-            .parse::<u32>()
-            .map_err(|e| format!("Failed to parse seq_id: {}", e))?;
-        let event = u32::from_str_radix(parts[1].trim_start_matches("0x"), 16)
-            .map_err(|e| format!("Failed to parse event: {}", e))?;
-        Ok(Uid { seq_id, event })
-    }
-}
-
-// ----------------------------------------------------
-// Definition of the SrcId RawField,
-// which is used to identify event sources
-// ----------------------------------------------------
-
-impl FromStr for SrcId {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
-        if s == "None" {
-            return Ok(SrcId::None);
-        }
-        let parts: Vec<&str> = s.split('(').collect();
-        if parts.len() != 2 || !parts[1].ends_with(')') {
-            return Err(format!("Invalid SrcId format: {}", s));
-        }
-        let id_type = parts[0];
-        let id_value_str = &parts[1][..parts[1].len() - 1];
-        let id_value = id_value_str
-            .parse::<u16>()
-            .map_err(|e| format!("Failed to parse SrcId value: {}", e))?;
-        match id_type {
-            "Mat" => Ok(SrcId::Mat(id_value)),
-            "Surf" => Ok(SrcId::Surf(id_value)),
-            "MatSurf" => Ok(SrcId::MatSurf(id_value)),
-            "Light" => Ok(SrcId::Light(id_value)),
-            _ => Err(format!("Unknown SrcId type: {}", id_type)),
-        }
-    }
-}
-
-impl Uid {
-    pub fn new(seq_id: u32, event: u32) -> Self {
-        Self { seq_id, event }
-    }
-
-    pub fn from_event(seq_id: u32, event: &EventId) -> Self {
-        Self {
-            seq_id,
-            event: event.encode(),
-        }
-    }
-
-    pub fn encode(&self) -> u64 {
-        ((self.seq_id as u64) << 32) | (self.event.raw() as u64)
-    }
-
-    pub fn decode(encoded: u64) -> Self {
-        let seq_id = (encoded >> 32) as u32;
-        let event = (encoded & 0xFFFFFFFF) as u32;
-        Self { seq_id, event }
-    }
-}
 
 /// Named source identifier for humans.
 ///
@@ -719,8 +609,9 @@ impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
 
 #[cfg(test)]
 mod tests {
-    use crate::EventType;
-    use crate::emission::Emission;
+    use crate::RawEvent;
+    use crate::event::Emission;
+    use crate::event::EventType;
     use crate::filter::BitsProperty;
     use crate::mcrt_event;
     use crate::pattern;
@@ -800,24 +691,19 @@ mod tests {
     fn insert_events() {
         let mut ledger = Ledger::new();
         let emission_event = EventId {
-            event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
+            event_type: EventType::Emission(Emission::PointSource),
             src_id: SrcId::Light(2),
         };
         let uid1 = ledger.insert_start(emission_event);
         assert_eq!(uid1.seq_id, 0);
         let mcrt_event = EventId {
-            event_type: crate::EventType::MCRT(crate::mcrt_event!(
-                Material,
-                Elastic,
-                HenyeyGreenstein,
-                Forward
-            )),
+            event_type: EventType::MCRT(mcrt_event!(Material, Elastic, HenyeyGreenstein, Forward)),
             src_id: SrcId::Mat(2),
         };
         let uid2 = ledger.insert(uid1.clone(), mcrt_event);
         assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
-            event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
+            event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
             src_id: SrcId::Mat(2),
         };
         let uid3 = ledger.insert(uid2.clone(), mcrt_event);
@@ -849,20 +735,20 @@ mod tests {
         let mat_src_id = ledger.with_mat("material1".to_string());
         // TODO: Complete the entire implementation to test the json writer
         let emission_event = EventId {
-            event_type: crate::EventType::Emission(crate::emission::Emission::PointSource),
+            event_type: EventType::Emission(Emission::PointSource),
             src_id: SrcId::Light(1),
         };
         let uid1 = ledger.insert_start(emission_event);
 
         let mcrt_event = EventId {
-            event_type: crate::EventType::MCRT(crate::mcrt_event!(Interface, Refraction)),
+            event_type: EventType::MCRT(mcrt_event!(Interface, Refraction)),
             src_id: surf_src_id,
         };
         let uid2 = ledger.insert(uid1.clone(), mcrt_event);
 
         assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
-            event_type: crate::EventType::MCRT(crate::mcrt_event!(Material, Elastic, Mie, Forward)),
+            event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
             src_id: mat_src_id,
         };
         let uid3 = ledger.insert(uid2.clone(), mcrt_event);
@@ -895,7 +781,8 @@ mod tests {
         );
 
         let stored_ledger: Ledger = {
-            let contents: String = fs::read_to_string(temp_file_path).expect("Unabel to read json file");
+            let contents: String =
+                fs::read_to_string(temp_file_path).expect("Unabel to read json file");
             serde_json::from_str(&contents).expect("Unable to parse ledger file")
             // FIXME: Directly reading from file causes conflict with `de_dexify` which expects a
             // borrowed value
@@ -920,7 +807,9 @@ mod tests {
         let _event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
 
         let result = ledger.get_dangling_uids();
-        assert_eq!(result.len(), 1, "Expected exactly one dangling UID in a simple chain");
+        assert_eq!(result.len(), 1,
+            "Expected exactly one dangling UID in a simple chain"
+        );
     }
 
     #[test]

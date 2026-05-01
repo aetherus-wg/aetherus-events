@@ -329,14 +329,14 @@ impl Decode<u32> for ScatterDir {
 #[macro_export]
 macro_rules! mcrt_event {
     ($event_type:ident) => {
-        $crate::mcrt::MCRT::$event_type
+        $crate::event::MCRT::$event_type
     };
     ($subtype:ident, $sstype:ident) => {
-        $crate::mcrt::MCRT::$subtype($crate::mcrt::$subtype::$sstype)
+        $crate::event::MCRT::$subtype($crate::event::$subtype::$sstype)
     };
     ($stype:ident, $sstype:ident, $ssstype:ident, $dirtype:ident) => {
-        $crate::mcrt::MCRT::$stype($crate::mcrt::$stype::$sstype(
-            $crate::mcrt::$sstype::$ssstype($crate::mcrt::ScatterDir::$dirtype),
+        $crate::event::MCRT::$stype($crate::event::$stype::$sstype(
+            $crate::event::$sstype::$ssstype($crate::event::ScatterDir::$dirtype),
         ))
     };
 }
