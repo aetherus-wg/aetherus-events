@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+.envrc
+/benches/data/simulation_ledger.json
