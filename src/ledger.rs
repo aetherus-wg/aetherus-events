@@ -14,7 +14,7 @@
 //! ```rust
 //! use aetherus_events::prelude::*;
 //! use aetherus_events::mcrt_event;
-//! use aetherus_events::event::Emission;
+//! use aetherus_events::events::Emission;
 //!
 //! let mut ledger = Ledger::new();
 //!
@@ -65,18 +65,6 @@ pub enum SrcName {
     Detector(String),
 }
 
-impl ToString for SrcName {
-    fn to_string(&self) -> String {
-        match self {
-            SrcName::Light(name) => name.clone(),
-            SrcName::Surf(name) => name.clone(),
-            SrcName::MatSurf(name) => name.clone(),
-            SrcName::Mat(name) => name.clone(),
-            SrcName::Detector(name) => name.clone(),
-        }
-    }
-}
-
 // ----------------------------------------------------
 // Definition of Ledger struct and methods
 // ----------------------------------------------------
@@ -103,7 +91,7 @@ where
 /// - Event chains (next/prev): Linked lists of event sequences
 /// - Start events (start_events): Root events, which have no previous event cause
 #[serde_as]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Ledger {
     grps: HashMap<String, SrcId>, // Key: Group name
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
@@ -150,7 +138,7 @@ impl Ledger {
             }
             None => {
                 self.src_map
-                    .insert(light_id.clone(), vec![SrcName::Light(light_name)]);
+                    .insert(light_id, vec![SrcName::Light(light_name)]);
             }
         };
         light_id
@@ -159,17 +147,17 @@ impl Ledger {
     pub fn with_surf(&mut self, obj_name: String, grp: Option<String>) -> SrcId {
         let src_id = if let Some(grp_name) = grp {
             let src_id = match self.grps.get(&grp_name) {
-                Some(src_id) => src_id.clone(),
+                Some(src_id) => *src_id,
                 None => {
                     // Create new SurfId
                     let surf_id = SrcId::Surf(self.next_surf_id);
                     self.next_surf_id += 1;
-                    self.grps.insert(grp_name.clone(), surf_id.clone());
+                    self.grps.insert(grp_name.clone(), surf_id);
                     surf_id
                 }
             };
 
-            let grp_src_id = match src_id {
+            match src_id {
                 SrcId::Surf(_) => src_id,
                 SrcId::MatSurf(_) => src_id,
                 SrcId::Mat(_) => {
@@ -200,9 +188,7 @@ impl Ledger {
                 SrcId::None => {
                     panic!("Group name {} registered an invalid None source", grp_name);
                 }
-            };
-
-            grp_src_id
+            }
         } else {
             let surf_id = SrcId::Surf(self.next_surf_id);
             self.next_surf_id += 1;
@@ -213,7 +199,7 @@ impl Ledger {
             Some(value) => value.push(SrcName::Surf(obj_name)),
             None => {
                 self.src_map
-                    .insert(src_id.clone(), vec![SrcName::Surf(obj_name)]);
+                    .insert(src_id, vec![SrcName::Surf(obj_name)]);
             }
         };
 
@@ -233,7 +219,7 @@ impl Ledger {
             Some(value) => value.push(SrcName::Mat(mat_name)),
             None => {
                 self.src_map
-                    .insert(mat_id.clone(), vec![SrcName::Mat(mat_name)]);
+                    .insert(mat_id, vec![SrcName::Mat(mat_name)]);
             }
         };
 
@@ -250,17 +236,17 @@ impl Ledger {
     ) -> SrcId {
         let src_id = if let Some(grp_name) = grp {
             let src_id = match self.grps.get(&grp_name) {
-                Some(src_id) => src_id.clone(),
+                Some(src_id) => *src_id,
                 None => {
                     // Create new MatId
                     let surf_id = SrcId::MatSurf(self.next_matsurf_id);
                     self.next_matsurf_id -= 1;
-                    self.grps.insert(grp_name.clone(), surf_id.clone());
+                    self.grps.insert(grp_name.clone(), surf_id);
                     surf_id
                 }
             };
 
-            let grp_src_id = match src_id {
+            match src_id {
                 SrcId::MatSurf(_) => src_id,
                 SrcId::Surf(_) | SrcId::Mat(_) => {
                     let matsurf_id = self.next_matsurf_id;
@@ -306,8 +292,7 @@ impl Ledger {
                 SrcId::None => {
                     panic!("Group name {} registered an invalid None source", grp_name);
                 }
-            };
-            grp_src_id
+            }
         } else {
             let surf_id = SrcId::MatSurf(self.next_matsurf_id);
             self.next_matsurf_id -= 1;
@@ -319,7 +304,7 @@ impl Ledger {
             Some(value) => value.push(SrcName::MatSurf(matsurf_name)),
             None => {
                 self.src_map
-                    .insert(src_id.clone(), vec![SrcName::MatSurf(matsurf_name)]);
+                    .insert(src_id, vec![SrcName::MatSurf(matsurf_name)]);
             }
         };
 
@@ -331,8 +316,8 @@ impl Ledger {
     pub fn insert_start(&mut self, start_event: impl Into<u32>) -> Uid {
         let uid = Uid::new(0, start_event.into());
 
-        if self.insert_entry(uid.clone(), 1) {
-            self.start_events.push(uid.clone());
+        if self.insert_entry(uid, 1) {
+            self.start_events.push(uid);
         }
 
         if self.next_seq_id == 0 {
@@ -359,7 +344,7 @@ impl Ledger {
         // FIXME: This is the only portion of the Ledger that needs to be accessed concurently.
         // Then we should encapsulate this section to run it atomically, then the Ledger can
         // implement Send + Sync traits safely without Arc<Mutex>
-        if self.insert_entry(uid.clone(), self.next_seq_id) {
+        if self.insert_entry(uid, self.next_seq_id) {
             self.next_seq_id += 1;
         }
 
@@ -369,7 +354,7 @@ impl Ledger {
     /// WARN: This is meant to be called only with dangling UIDs
     pub fn prune(&mut self, uid: &Uid) {
         let mut bifurcate = false;
-        let mut current_uid = uid.clone();
+        let mut current_uid = *uid;
 
         while !bifurcate {
             self.next
@@ -378,7 +363,7 @@ impl Ledger {
 
             if let Some(prev_uid) = self.prev.get(&current_uid.seq_id).cloned() {
                 bifurcate = match self.next.get(&current_uid.seq_id) {
-                    Some(next_map) => next_map.len() > 0,
+                    Some(next_map) => !next_map.is_empty(),
                     None => {
                         panic!(
                             "Inconsistent Ledger state: missing next entry for seq_id {}",
@@ -405,25 +390,23 @@ impl Ledger {
     pub fn get_dangling_uids(&self) -> Vec<Uid> {
         let mut dangling_uids = Vec::new();
         for (seq_id, map) in &self.next {
-            if map.is_empty() {
-                if let Some(uid) = self.prev.get(seq_id) {
-                    dangling_uids.push(uid.clone());
-                }
+            if map.is_empty() && let Some(uid) = self.prev.get(seq_id) {
+                    dangling_uids.push(*uid);
             }
         }
         dangling_uids
     }
 
     fn insert_entry(&mut self, uid: Uid, next_seq_id: u32) -> bool {
-        if None == self.get_next_seq_id(&uid) {
-            if self.next.get(&uid.seq_id) == None {
+        if self.get_next_seq_id(&uid).is_none() {
+            if !self.next.contains_key(&uid.seq_id) {
                 self.next.insert(uid.seq_id, BTreeMap::new());
             }
             self.next
                 .get_mut(&uid.seq_id)
                 .unwrap()
                 .insert(uid.event, next_seq_id);
-            self.prev.insert(next_seq_id, uid.clone());
+            self.prev.insert(next_seq_id, uid);
             // Prepare the next seq_id entry
             self.next.insert(next_seq_id, BTreeMap::new());
             true
@@ -444,12 +427,12 @@ impl Ledger {
     }
     pub fn get_next(&self, uid: &Uid) -> Vec<Uid> {
         let mut next_uids = Vec::new();
-        if let Some(next_seq_id) = self.get_next_seq_id(&uid) {
-            if let Some(map) = self.next.get(&next_seq_id) {
-                for (next_event, _) in map {
-                    let next_uid = Uid::new(next_seq_id, *next_event);
-                    next_uids.push(next_uid);
-                }
+        if let Some(next_seq_id) = self.get_next_seq_id(uid)
+            && let Some(map) = self.next.get(&next_seq_id)
+        {
+            for next_event in map.keys() {
+                let next_uid = Uid::new(next_seq_id, *next_event);
+                next_uids.push(next_uid);
             }
         }
         next_uids
@@ -461,10 +444,10 @@ impl Ledger {
 
     pub fn get_chain(&self, last_uid: Uid) -> Vec<Uid> {
         let mut chain = Vec::new();
-        chain.push(last_uid.clone());
+        chain.push(last_uid);
         let mut seq_id = last_uid.seq_id;
         while let Some(uid) = self.get_prev(seq_id) {
-            chain.push(uid.clone());
+            chain.push(uid);
             seq_id = uid.seq_id;
         }
         chain.reverse();
@@ -484,7 +467,7 @@ impl Ledger {
         let mut src_dict = HashMap::new();
         for (src_id, src_names) in &self.src_map {
             for src_name in src_names {
-                src_dict.insert(src_name.clone(), src_id.clone());
+                src_dict.insert(src_name.clone(), *src_id);
             }
         }
         src_dict
@@ -513,7 +496,7 @@ impl Ledger {
                 let event = EventId::decode(chain_uid.event);
                 if !nodes.contains(chain_uid) {
                     let event_str = format!("{}", event).replace("|", "\\|");
-                    if with_cnt && let Some(cnt) = freq_dict.get(&chain_uid) {
+                    if with_cnt && let Some(cnt) = freq_dict.get(chain_uid) {
                         dot.push_str(&format!(
                             "  n{:016X} [label=\"{{<l>{}|{}|<r>cnt({})}}\"];\n",
                             chain_uid.encode(),
@@ -610,8 +593,8 @@ impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
 #[cfg(test)]
 mod tests {
     use crate::RawEvent;
-    use crate::event::Emission;
-    use crate::event::EventType;
+    use crate::events::Emission;
+    use crate::events::EventType;
     use crate::filter::BitsProperty;
     use crate::mcrt_event;
     use crate::pattern;
@@ -646,9 +629,9 @@ mod tests {
                     .get(&src_id)
                     .unwrap()
                     .iter()
-                    .map(|src| src.to_string())
+                    .map(|src| src.clone())
                     .collect::<Vec<_>>(),
-                vec![mat.clone()]
+                vec![SrcName::Mat(mat.clone())]
             );
         }
 
@@ -661,9 +644,9 @@ mod tests {
                     .get(&src_id)
                     .unwrap()
                     .iter()
-                    .map(|src| src.to_string())
-                    .collect::<Vec<String>>(),
-                vec![surf.clone()]
+                    .map(|src| src.clone())
+                    .collect::<Vec<_>>(),
+                vec![SrcName::Surf(surf.clone())]
             );
         }
 
@@ -677,9 +660,9 @@ mod tests {
                     .get(&src_id)
                     .unwrap()
                     .iter()
-                    .map(|src| src.to_string())
-                    .collect::<Vec<String>>(),
-                vec![expected_name]
+                    .map(|src| src.clone())
+                    .collect::<Vec<_>>(),
+                vec![SrcName::MatSurf(expected_name)]
             );
         }
 

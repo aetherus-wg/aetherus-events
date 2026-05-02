@@ -1,4 +1,4 @@
-use crate::{Decode, Encode, event::{Emission, Interface, MCRT}, raw::{self, RawField}, src::SrcId};
+use crate::{Decode, Encode, events::{Emission, Interface, MCRT}, raw::{self, RawField}, src::SrcId};
 
 
 // =======================================
@@ -40,9 +40,9 @@ impl std::fmt::Display for EventId {
     }
 }
 
-impl Into<u32> for EventId {
-    fn into(self) -> u32 {
-        self.encode()
+impl From<EventId> for u32 {
+    fn from(event: EventId) -> u32 {
+        event.encode()
     }
 }
 
@@ -104,7 +104,7 @@ impl Encode<u32> for EventId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{event::{Elastic, Material, ScatterDir}, mcrt_event};
+    use crate::{events::{Elastic, Material, ScatterDir}, mcrt_event};
 
     use super::*;
 

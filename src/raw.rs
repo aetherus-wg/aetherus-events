@@ -24,7 +24,6 @@
 
 use num_enum::{TryFromPrimitive, IntoPrimitive};
 use std::convert::TryFrom;
-use std::usize;
 
 pub trait RawField: Clone {
     fn mask() -> u32;
@@ -35,7 +34,7 @@ pub trait RawField: Clone {
         Self: TryFrom<u32>,
         <Self as TryFrom<u32>>::Error: std::fmt::Debug,
     {
-        let value = ((raw & Self::mask()) >> Self::shift()) as u32;
+        let value = (raw & Self::mask()) >> Self::shift();
         Self::try_from(value).unwrap_or_else(|err| {
             panic!("Failed to convert value: {:?}, error: {:?}", value, err);
         })
@@ -44,7 +43,7 @@ pub trait RawField: Clone {
     where
         Self: Into<u32>,
     {
-        let value = (self.clone().into() as u32) << Self::shift();
+        let value = self.clone().into() << Self::shift();
         debug_assert!(
             value & Self::mask() == value,
             "Encoded value exceeds field mask"
@@ -64,9 +63,9 @@ macro_rules! impl_u8_raw_field {
                 Self::try_from(v).map_err(|e| format!("{e}"))
             }
         }
-        impl Into<u32> for $t {
-            fn into(self) -> u32 {
-                u8::from(self) as u32
+        impl From<$t> for u32 {
+            fn from(data: $t) -> u32 {
+                u8::from(data) as u32
             }
         }
     };

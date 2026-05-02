@@ -111,8 +111,9 @@ pub enum Elastic {
 /// - `Side`: 30deg ≤ θ < 150deg
 /// - `Backward`: 150deg ≤ θ ≤ 180deg
 /// - `Unknown`: No constraint
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Default)]
 pub enum ScatterDir {
+    #[default]
     Unknown,
     Forward,
     Side,
@@ -121,7 +122,7 @@ pub enum ScatterDir {
 
 impl ScatterDir {
     pub fn new() -> Self {
-        ScatterDir::Unknown
+        ScatterDir::default()
     }
     pub fn from(theta: f64) -> Self {
         if theta < std::f64::consts::FRAC_PI_4 {
@@ -329,14 +330,14 @@ impl Decode<u32> for ScatterDir {
 #[macro_export]
 macro_rules! mcrt_event {
     ($event_type:ident) => {
-        $crate::event::MCRT::$event_type
+        $crate::events::MCRT::$event_type
     };
     ($subtype:ident, $sstype:ident) => {
-        $crate::event::MCRT::$subtype($crate::event::$subtype::$sstype)
+        $crate::events::MCRT::$subtype($crate::events::$subtype::$sstype)
     };
     ($stype:ident, $sstype:ident, $ssstype:ident, $dirtype:ident) => {
-        $crate::event::MCRT::$stype($crate::event::$stype::$sstype(
-            $crate::event::$sstype::$ssstype($crate::event::ScatterDir::$dirtype),
+        $crate::events::MCRT::$stype($crate::events::$stype::$sstype(
+            $crate::events::$sstype::$ssstype($crate::events::ScatterDir::$dirtype),
         ))
     };
 }

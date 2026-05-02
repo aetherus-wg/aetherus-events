@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
 use crate::{Encode, RawEvent}; // traits:
-use crate::event::EventId;
+use crate::events::EventId;
 
 // ----------------------------------------------------
 // Definition of Unique IDentifier (Uid) and methods/traits

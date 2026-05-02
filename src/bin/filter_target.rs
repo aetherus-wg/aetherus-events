@@ -15,8 +15,8 @@ fn main() {
     let ledger = read_ledger(&ledger_path).expect("Unable to read ledger file");
 
     let csv_path = args.get(2).map(|s| s.parse::<PathBuf>().unwrap());
-    let phot_records = if let Some(ref csv_path) = csv_path {
-        read_csv(&csv_path).expect("Unable to read CSV file")
+    let phot_records = if let Some(csv_path) = &csv_path {
+        read_csv(csv_path).expect("Unable to read CSV file")
     } else {
         Vec::new()
     };
@@ -44,7 +44,7 @@ fn main() {
         pattern!(Detection, SrcId::None),
     ]
     .into_iter()
-    .map(|bits_match| BitsProperty::Match(bits_match))
+    .map(BitsProperty::Match)
     .collect();
 
     // Glass specular
@@ -95,7 +95,7 @@ fn main() {
         csv::Writer::from_path(csv_outpath).expect("Unable to create output CSV file");
     for filtered_record in phot_filtered {
         csv_writer
-            .serialize(&filtered_record)
+            .serialize(filtered_record)
             .expect("Unable to write filtered CSV file");
     }
 }

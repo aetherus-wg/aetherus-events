@@ -50,7 +50,7 @@ pub mod raw;
 
 pub mod uid;
 pub mod src;
-pub mod event;
+pub mod events;
 pub mod ledger;
 
 pub mod read;
@@ -58,7 +58,7 @@ pub mod filter;
 
 pub use crate::ledger::Ledger;
 pub use crate::src::SrcId;
-pub use crate::event::{EventType, EventId};
+pub use crate::events::{EventType, EventId};
 pub use crate::uid::Uid;
 
 use crate::raw::Pipeline;

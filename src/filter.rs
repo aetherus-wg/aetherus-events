@@ -31,24 +31,25 @@
 //! but it was the driving force to develop an external DSL!</div>
 //!
 //! 1. We could filter for all Scattering Events coming from a specific material with MatId as such
-//! ` filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)`
+//!    `filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)`
 //!
 //! 2. Filter for all interactions with objects that have SurfId(x) or MatId(x) described by
 //!    MatSurfId(x)
-//! `filter_seq!(MCRT|*|*|MatSurfId)`
+//!    `filter_seq!(MCRT|*|*|MatSurfId)`
 //!
 //! 3. Filter for events that have N number of interactions described by
-//! `
-//! use aetherus_events::filter_seq;
-//! filter_seq!([MCRT|Interface|Refraction|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId, ... ]);
-//! `
+//! ```ignore
+//! use aetherus_events::filter_mcrt_seq;
+//! filter_mcrt_seq!([MCRT|Interface|Refraction|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId, ... ]);
+//! ```
 //!
 //! 4. Filter for permutations of events
-//! `
-//! filter_seq!(perm![ MCRT|Interface|*|SurfId,
+//! ```ignore
+//! use aetherus_events::filter_mcrt_seq;
+//! filter_mcrt_seq!(perm![ MCRT|Interface|*|SurfId,
 //!                    MCRT|Material|{Elastic, Inelastic}|*|*|MatId,
 //!                    ... ])
-//! `
+//! ```
 
 //! ## Building patterns for filtering
 //! As an internal DSL we would like to construct patterns as follows,
@@ -57,12 +58,13 @@
 //! Macro to create a filter specification using pipe-delimited syntax
 //! Single event filter:
 //! ```ignore
-//! filter_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)
+//! use aetherus_events::filter_mcrt_seq;
+//! filter_mcrt_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)
 //! ```
 //!
 //! Sequence of events:
 //! ```ignore
-//! filter_seq!([MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId])
+//! filter_mcrt_seq!([MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId])
 //! ```
 //!
 //! Permutation (any order):
@@ -150,7 +152,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
         } else {
             let next_uids = ledger.get_next(&uid_seq.uid);
             assert!(
-                next_uids.len() > 0,
+                !next_uids.is_empty(),
                 "No more subsequent events for UID: {}",
                 uid_seq.uid
             );
@@ -203,8 +205,8 @@ macro_rules! pattern {
         match Pipeline::$pipeline {
             Pipeline::Emission => {
                 let (mut mask, mut value) = filter_emit_seq!($src_id);
-                mask = mask   | Pipeline::mask();
-                value = value | Pipeline::Emission.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::Emission.encode();
                 BitsMatch::new(mask, value)
             },
             Pipeline::MCRT => {
@@ -212,8 +214,8 @@ macro_rules! pattern {
             },
             Pipeline::Detection => {
                 let (mut mask, mut value) = filter_detect_seq!($src_id);
-                mask = mask   | Pipeline::mask();
-                value = value | Pipeline::Detection.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::Detection.encode();
                 BitsMatch::new(mask, value)
             },
             _ => {
@@ -230,20 +232,20 @@ macro_rules! pattern {
         match Pipeline::$pipeline {
             Pipeline::Emission => {
                 let (mut mask, mut value) = filter_emit_seq!($type, $src_id);
-                mask = mask   | Pipeline::mask();
-                value = value | Pipeline::Emission.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::Emission.encode();
                 BitsMatch::new(mask, value)
             },
             Pipeline::MCRT => {
                 let (mut mask, mut value) = filter_mcrt_seq!($type, $src_id);
-                mask = mask   | Pipeline::mask();
-                value = value | Pipeline::MCRT.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::MCRT.encode();
                 BitsMatch::new(mask, value)
             },
             Pipeline::Detection => {
                 let (mut mask, mut value) = filter_detect_seq!($type, $src_id);
-                mask = mask   | Pipeline::mask();
-                value = value | Pipeline::Detection.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::Detection.encode();
                 BitsMatch::new(mask, value)
             },
             _ => {
@@ -264,20 +266,20 @@ macro_rules! pattern {
         match Pipeline::$pipeline {
             Pipeline::Emission => {
                 let (mut mask, mut value) = filter_emit_seq!($supertype, $subtype, $src_id);
-                mask  = mask  | Pipeline::mask();
-                value = value | Pipeline::Emission.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::Emission.encode();
                 BitsMatch::new(mask, value)
             },
             Pipeline::MCRT => {
                 let (mut mask, mut value) = filter_mcrt_seq!($supertype, $subtype, $src_id);
-                mask  = mask  | Pipeline::mask();
-                value = value | Pipeline::MCRT.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::MCRT.encode();
                 BitsMatch::new(mask, value)
             },
             Pipeline::Detection => {
                 let (mut mask, mut value) = filter_detect_seq!($supertype, $subtype, $src_id);
-                mask  = mask  | Pipeline::mask();
-                value = value | Pipeline::Detection.encode();
+                mask  |= Pipeline::mask();
+                value |= Pipeline::Detection.encode();
                 BitsMatch::new(mask, value)
             },
             _ => {
@@ -464,7 +466,7 @@ macro_rules! filter_detect_seq {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EventId, event::EventType, src::SrcId};
+    use crate::{EventId, events::EventType, src::SrcId};
 
     #[test]
     fn test_find_dangling_uids_empty_ledger() {
