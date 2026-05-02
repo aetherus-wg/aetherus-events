@@ -39,6 +39,9 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
 use crate::Decode;
 use crate::EventId;
@@ -77,6 +80,74 @@ impl ToString for SrcName {
     }
 }
 
+trait EventMap<K,V> {
+    fn new() -> Self;
+    fn get(&self, querry: &K) -> Option<V>;
+    fn insert(&mut self, entry: (K,V));
+}
+
+pub struct LedgerNode<M, T>
+where
+    M: EventMap<T, Arc<LedgerNode<M,T>>>,
+    T: Clone,
+{
+    seq_no: Option<u32>,
+    event: T,
+    children: RwLock<M>,
+    cnt: AtomicU32,
+}
+
+impl<M, T> LedgerNode<M, T>
+where
+    M: EventMap<T, Arc<LedgerNode<M,T>>>,
+    T: Clone,
+{
+    pub fn new(event: T) -> Self {
+        Self {
+            seq_no: None,
+            event,
+            children: RwLock::new(M::new()),
+            cnt: AtomicU32::new(0),
+        }
+    }
+    pub fn insert(&self, event: T) -> Arc<LedgerNode<M,T>> {
+        let mut cnt = self.cnt.load(Ordering::Relaxed);
+        loop {
+            if let Some(next) = self.children.read().unwrap().get(&event) {
+                return next;
+            } else {
+                let mut writer = self.children.write().unwrap();
+                match self.cnt.compare_exchange(cnt, cnt + 1, Ordering::Acquire, Ordering::Relaxed) {
+                    Ok(_) => {
+                        // Successfully reserved the next sequence number, now insert the new node
+                        let new_node = Arc::new(LedgerNode::new(event.clone()));
+                        writer.insert((event, new_node.clone()));
+                        return new_node
+                    }
+                    Err(e) => cnt = e,
+                }
+            }
+        }
+    }
+}
+
+pub struct Ledger<M, T>
+where
+    M: EventMap<T, Arc<LedgerNode<M,T>>>,
+    T: Clone,
+{
+    grps: HashMap<String, SrcId>, // Key: Group name
+    src_map: HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
+    start_events: Vec<Uid>,
+
+    next_mat_id: u16,
+    next_surf_id: u16,
+    next_matsurf_id: u16,
+    next_light_id: u16,
+
+    root: Arc<LedgerNode<M, T>>,
+}
+
 // ----------------------------------------------------
 // Definition of Ledger struct and methods
 // ----------------------------------------------------
@@ -87,7 +158,7 @@ impl ToString for SrcName {
 //   - insert events and build the event chain
 //   - query events, using the next/prev maps as a doubled linked list
 
-pub fn write_ledger_to_json<P>(ledger: &Ledger, file_path: P) -> Result<(), serde_json::Error>
+pub fn write_ledger_to_json<P>(ledger: &LedgerSerde, file_path: P) -> Result<(), serde_json::Error>
 where
     P: AsRef<std::path::Path>,
 {
@@ -104,7 +175,7 @@ where
 /// - Start events (start_events): Root events, which have no previous event cause
 #[serde_as]
 #[derive(Serialize, Deserialize)]
-pub struct Ledger {
+pub struct LedgerSerde {
     grps: HashMap<String, SrcId>, // Key: Group name
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     src_map: HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
@@ -124,7 +195,7 @@ pub struct Ledger {
     next_seq_id: u32,
 }
 
-impl Ledger {
+impl LedgerSerde {
     pub fn new() -> Self {
         Self {
             grps: HashMap::new(),
