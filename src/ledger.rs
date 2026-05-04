@@ -93,38 +93,38 @@ where
 #[serde_as]
 #[derive(Serialize, Deserialize, Default)]
 pub struct Ledger {
-    grps: HashMap<String, SrcId>, // Key: Group name
+    grps:         HashMap<String, SrcId>, // Key: Group name
     #[serde_as(as = "HashMap<DisplayFromStr, _>")]
-    src_map: HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
+    src_map:      HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
     start_events: Vec<Uid>,
 
-    next_mat_id: u16,
-    next_surf_id: u16,
+    next_mat_id:     u16,
+    next_surf_id:    u16,
     next_matsurf_id: u16,
-    next_light_id: u16,
+    next_light_id:   u16,
 
     // Use a nested map: (seq_id -> (uid -> next_seq_id)) instead of (seq_id, uid) -> next_seq_id in order to
     // retrieve be able to do a depth search based on seq_id
     #[serde_as(as = "BTreeMap<_, HexInnerMap>")]
-    next: BTreeMap<u32, BTreeMap<u32, u32>>,
+    next:        BTreeMap<u32, BTreeMap<u32, u32>>,
     #[serde_as(as = "BTreeMap<_, DisplayFromStr>")]
-    prev: BTreeMap<u32, Uid>,
+    prev:        BTreeMap<u32, Uid>,
     next_seq_id: u32,
 }
 
 impl Ledger {
     pub fn new() -> Self {
         Self {
-            grps: HashMap::new(),
-            src_map: HashMap::new(),
-            start_events: Vec::new(),
-            next_mat_id: 0,
-            next_surf_id: 0,
+            grps:            HashMap::new(),
+            src_map:         HashMap::new(),
+            start_events:    Vec::new(),
+            next_mat_id:     0,
+            next_surf_id:    0,
             next_matsurf_id: u16::MAX,
-            next_light_id: 0,
-            next: BTreeMap::new(),
-            prev: BTreeMap::new(),
-            next_seq_id: 0,
+            next_light_id:   0,
+            next:            BTreeMap::new(),
+            prev:            BTreeMap::new(),
+            next_seq_id:     0,
         }
     }
 
@@ -198,8 +198,7 @@ impl Ledger {
         match self.src_map.get_mut(&src_id) {
             Some(value) => value.push(SrcName::Surf(obj_name)),
             None => {
-                self.src_map
-                    .insert(src_id, vec![SrcName::Surf(obj_name)]);
+                self.src_map.insert(src_id, vec![SrcName::Surf(obj_name)]);
             }
         };
 
@@ -218,8 +217,7 @@ impl Ledger {
         match self.src_map.get_mut(&mat_id) {
             Some(value) => value.push(SrcName::Mat(mat_name)),
             None => {
-                self.src_map
-                    .insert(mat_id, vec![SrcName::Mat(mat_name)]);
+                self.src_map.insert(mat_id, vec![SrcName::Mat(mat_name)]);
             }
         };
 
@@ -390,8 +388,9 @@ impl Ledger {
     pub fn get_dangling_uids(&self) -> Vec<Uid> {
         let mut dangling_uids = Vec::new();
         for (seq_id, map) in &self.next {
-            if map.is_empty() && let Some(uid) = self.prev.get(seq_id) {
-                    dangling_uids.push(*uid);
+            if map.is_empty() && let Some(uid) = self.prev.get(seq_id)
+            {
+                dangling_uids.push(*uid);
             }
         }
         dangling_uids
@@ -399,9 +398,7 @@ impl Ledger {
 
     fn insert_entry(&mut self, uid: Uid, next_seq_id: u32) -> bool {
         if self.get_next_seq_id(&uid).is_none() {
-            if !self.next.contains_key(&uid.seq_id) {
-                self.next.insert(uid.seq_id, BTreeMap::new());
-            }
+            self.next.entry(uid.seq_id).or_default();
             self.next
                 .get_mut(&uid.seq_id)
                 .unwrap()
@@ -628,9 +625,7 @@ mod tests {
                     .src_map
                     .get(&src_id)
                     .unwrap()
-                    .iter()
-                    .map(|src| src.clone())
-                    .collect::<Vec<_>>(),
+                    .to_vec(),
                 vec![SrcName::Mat(mat.clone())]
             );
         }
@@ -643,9 +638,7 @@ mod tests {
                     .src_map
                     .get(&src_id)
                     .unwrap()
-                    .iter()
-                    .map(|src| src.clone())
-                    .collect::<Vec<_>>(),
+                    .to_vec(),
                 vec![SrcName::Surf(surf.clone())]
             );
         }
@@ -659,9 +652,7 @@ mod tests {
                     .src_map
                     .get(&src_id)
                     .unwrap()
-                    .iter()
-                    .map(|src| src.clone())
-                    .collect::<Vec<_>>(),
+                    .to_vec(),
                 vec![SrcName::MatSurf(expected_name)]
             );
         }
@@ -675,24 +666,24 @@ mod tests {
         let mut ledger = Ledger::new();
         let emission_event = EventId {
             event_type: EventType::Emission(Emission::PointSource),
-            src_id: SrcId::Light(2),
+            src_id:     SrcId::Light(2),
         };
         let uid1 = ledger.insert_start(emission_event);
         assert_eq!(uid1.seq_id, 0);
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Material, Elastic, HenyeyGreenstein, Forward)),
-            src_id: SrcId::Mat(2),
+            src_id:     SrcId::Mat(2),
         };
-        let uid2 = ledger.insert(uid1.clone(), mcrt_event);
+        let uid2 = ledger.insert(uid1, mcrt_event);
         assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
-            src_id: SrcId::Mat(2),
+            src_id:     SrcId::Mat(2),
         };
-        let uid3 = ledger.insert(uid2.clone(), mcrt_event);
+        let uid3 = ledger.insert(uid2, mcrt_event);
         assert_eq!(uid3.seq_id, 2);
         // Check the chain
-        let chain = ledger.get_chain(uid3.clone());
+        let chain = ledger.get_chain(uid3);
         println!("Chain: {:?}", chain);
         println!(
             "Chain: {:?}",
@@ -719,24 +710,24 @@ mod tests {
         // TODO: Complete the entire implementation to test the json writer
         let emission_event = EventId {
             event_type: EventType::Emission(Emission::PointSource),
-            src_id: SrcId::Light(1),
+            src_id:     SrcId::Light(1),
         };
         let uid1 = ledger.insert_start(emission_event);
 
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Interface, Refraction)),
-            src_id: surf_src_id,
+            src_id:     surf_src_id,
         };
-        let uid2 = ledger.insert(uid1.clone(), mcrt_event);
+        let uid2 = ledger.insert(uid1, mcrt_event);
 
         assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
-            src_id: mat_src_id,
+            src_id:     mat_src_id,
         };
-        let uid3 = ledger.insert(uid2.clone(), mcrt_event);
+        let uid3 = ledger.insert(uid2, mcrt_event);
 
-        let chain = ledger.get_chain(uid3.clone());
+        let chain = ledger.get_chain(uid3);
         println!(
             "Chain: {:?}",
             chain

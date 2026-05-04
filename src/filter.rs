@@ -82,7 +82,7 @@ use std::fmt;
 /// `(event & mask) == value`
 #[derive(Clone, Copy)]
 pub struct BitsMatch {
-    pub mask: u32,
+    pub mask:  u32,
     pub value: u32,
 }
 impl BitsMatch {
@@ -91,7 +91,7 @@ impl BitsMatch {
     }
     pub fn from_event(event: u32) -> Self {
         BitsMatch {
-            mask: 0xFFFFFFFF,
+            mask:  0xFFFFFFFF,
             value: event,
         }
     }
@@ -128,7 +128,7 @@ impl BitsProperty {
 }
 
 struct SeqQueueEntry {
-    pub uid: Uid,
+    pub uid:               Uid,
     pub bits_property_seq: VecDeque<BitsProperty>,
 }
 
@@ -138,7 +138,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
     // Initialize the queue with all events that have seq_no=0
     for uid in ledger.get_start_events() {
         seq_queue.push_back(SeqQueueEntry {
-            uid: *uid,
+            uid:               *uid,
             bits_property_seq: bits_property_seq.clone().into(),
         });
     }
@@ -159,7 +159,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
             for next_uid in next_uids {
                 if uid_seq.bits_property_seq.is_empty() {
                     seq_queue.push_back(SeqQueueEntry {
-                        uid: next_uid,
+                        uid:               next_uid,
                         bits_property_seq: uid_seq.bits_property_seq.clone(),
                     });
                 } else {
@@ -170,7 +170,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
                         new_bits_property_seq.pop_front();
                     }
                     seq_queue.push_back(SeqQueueEntry {
-                        uid: next_uid,
+                        uid:               next_uid,
                         bits_property_seq: new_bits_property_seq,
                     });
                 }

@@ -1,8 +1,10 @@
+use crate::{
+    filter::BitsMatch,
+    raw::{self, Pipeline, RawField},
+};
 use log::warn;
 use serde::{Deserialize, Serialize};
-use crate::{filter::BitsMatch, raw::{self, Pipeline, RawField}};
 use std::{ops::Deref, str::FromStr};
-
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug, Serialize, Deserialize, Hash)]
 pub enum SrcId {
@@ -30,23 +32,27 @@ impl std::fmt::Display for SrcId {
 }
 
 impl RawField for SrcId {
-    fn mask() -> u32 { 0x0000FFFF }
-    fn shift() -> usize { 0 }
-    fn bitsize() -> usize { 16 }
+    fn mask() -> u32 {
+        0x0000FFFF
+    }
+    fn shift() -> usize {
+        0
+    }
+    fn bitsize() -> usize {
+        16
+    }
     // FIXME: The decode and encode implementations don't work because the default trait functions
     // required that Self is TryFrom<u8> and Into<u8>.
     fn decode(raw: u32) -> Self {
         let id = (raw & Self::mask()) as u16;
         match Pipeline::decode(raw) {
             Pipeline::Emission => SrcId::Light(id),
-            Pipeline::MCRT     => {
-                match raw::MCRT::decode(raw) {
-                    raw::MCRT::Interface => SrcId::MatSurf(id),
-                    raw::MCRT::Reflector => SrcId::Surf(id),
-                    raw::MCRT::Material  => SrcId::Mat(id),
-                }
-            }
-            Pipeline::Detection  => {
+            Pipeline::MCRT => match raw::MCRT::decode(raw) {
+                raw::MCRT::Interface => SrcId::MatSurf(id),
+                raw::MCRT::Reflector => SrcId::Surf(id),
+                raw::MCRT::Material  => SrcId::Mat(id),
+            },
+            Pipeline::Detection => {
                 warn!("Detection pipeline does not have SrcId associated.");
                 SrcId::None
             }
@@ -87,14 +93,14 @@ impl Deref for SrcId {
 impl SrcId {
     pub fn bits_match(&self) -> BitsMatch {
         match self {
-            SrcId::None          => BitsMatch { mask: 0, value: 0 },
+            SrcId::None => BitsMatch { mask: 0, value: 0 },
             SrcId::SrcId(n)
             | SrcId::Mat(n)
             | SrcId::Surf(n)
             | SrcId::MatSurf(n)
             | SrcId::Light(n)
             | SrcId::Detector(n) => BitsMatch {
-                mask: 0xFFFF,
+                mask:  0xFFFF,
                 value: *n as u32,
             },
         }
@@ -127,4 +133,3 @@ impl FromStr for SrcId {
         }
     }
 }
-

@@ -165,7 +165,8 @@ fn criterion_benchmark(c: &mut Criterion) {
                 handle.join().unwrap();
             }
 
-            let ledger = Arc::try_unwrap(ledger).unwrap_or_else(|_| panic!("Error extracting final value of the Ledger"));
+            let ledger = Arc::try_unwrap(ledger)
+                .unwrap_or_else(|_| panic!("Error extracting final value of the Ledger"));
             let _ = black_box(ledger.into_inner().unwrap());
         })
     });

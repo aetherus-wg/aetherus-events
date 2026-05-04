@@ -1,9 +1,9 @@
-use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
+use std::str::FromStr;
 
-use crate::{Encode, RawEvent}; // traits:
 use crate::events::EventId;
+use crate::{Encode, RawEvent}; // traits:
 
 // ----------------------------------------------------
 // Definition of Unique IDentifier (Uid) and methods/traits
@@ -21,7 +21,7 @@ pub struct Uid {
         serialize_with = "array_bytes::ser_hexify_prefixed",
         deserialize_with = "array_bytes::de_dehexify"
     )]
-    pub event: u32, // u32 Event
+    pub event:  u32, // u32 Event
 }
 
 impl Hash for Uid {

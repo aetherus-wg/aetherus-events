@@ -1,5 +1,9 @@
-use crate::{Decode, Encode, events::{Emission, Interface, MCRT}, raw::{self, RawField}, src::SrcId};
-
+use crate::{
+    Decode, Encode,
+    events::{Emission, Interface, MCRT},
+    raw::{self, RawField},
+    src::SrcId,
+};
 
 // =======================================
 // Top level Event Type encoding and decoding
@@ -53,13 +57,13 @@ impl EventId {
     pub fn new_emission(emission_event: Emission, light_id: SrcId) -> Self {
         EventId {
             event_type: EventType::Emission(emission_event),
-            src_id: light_id,
+            src_id:     light_id,
         }
     }
     pub fn new_mcrt(mcrt_event: MCRT, matsurf_id: SrcId) -> Self {
         EventId {
             event_type: EventType::MCRT(mcrt_event),
-            src_id: matsurf_id,
+            src_id:     matsurf_id,
         }
     }
 }
@@ -104,7 +108,10 @@ impl Encode<u32> for EventId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{events::{Elastic, Material, ScatterDir}, mcrt_event};
+    use crate::{
+        events::{Elastic, Material, ScatterDir},
+        mcrt_event,
+    };
 
     use super::*;
 

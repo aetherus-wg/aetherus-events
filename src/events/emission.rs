@@ -26,7 +26,13 @@ pub enum Emission {
 
 impl_u8_raw_field!(Emission);
 impl RawField for Emission {
-    fn mask() -> u32 { 0x00ff0000 }
-    fn shift() -> usize { 16 }
-    fn bitsize() -> usize { 8 }
+    fn mask() -> u32 {
+        0x00ff0000
+    }
+    fn shift() -> usize {
+        16
+    }
+    fn bitsize() -> usize {
+        8
+    }
 }

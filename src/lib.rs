@@ -48,17 +48,17 @@ pub mod prelude;
 
 pub mod raw;
 
-pub mod uid;
-pub mod src;
 pub mod events;
 pub mod ledger;
+pub mod src;
+pub mod uid;
 
-pub mod read;
 pub mod filter;
+pub mod read;
 
+pub use crate::events::{EventId, EventType};
 pub use crate::ledger::Ledger;
 pub use crate::src::SrcId;
-pub use crate::events::{EventType, EventId};
 pub use crate::uid::Uid;
 
 use crate::raw::Pipeline;
@@ -85,7 +85,6 @@ pub trait RawEvent:
     fn raw(&self) -> u32;
 }
 
-
 // NOTE: Implementing this seems superfluous to the EventId::decode(u32)
 // Only reason this could be useful if there are other desirable way to encode the events,
 // but that's doubtful since the encoding scheme is taylored for u32
@@ -104,4 +103,3 @@ impl RawEvent for u32 {
         *self
     }
 }
-

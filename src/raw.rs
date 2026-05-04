@@ -22,7 +22,7 @@
 //! - `5`: Detection (photon detection)
 //! - `7`: Processing (post-processing)
 
-use num_enum::{TryFromPrimitive, IntoPrimitive};
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::convert::TryFrom;
 
 pub trait RawField: Clone {
@@ -78,18 +78,24 @@ macro_rules! impl_u8_raw_field {
 /// Codes use reserved bits: bit 0 = 1 (required), bit 3 = 0 (required)
 /// allowing custom stages to be interleaved at bit positions 1-2.
 pub enum Pipeline {
-    Emission   = 1,
-    MCRT       = 3,
-    Detection  = 5,
+    Emission = 1,
+    MCRT = 3,
+    Detection = 5,
     Processing = 7,
     // Other codes are free to be used for custom pipeline stages
 }
 
 impl_u8_raw_field!(Pipeline);
 impl RawField for Pipeline {
-    fn mask() -> u32 { 0x0F000000 }
-    fn shift() -> usize { 24 }
-    fn bitsize() -> usize { 4 }
+    fn mask() -> u32 {
+        0x0F000000
+    }
+    fn shift() -> usize {
+        24
+    }
+    fn bitsize() -> usize {
+        4
+    }
 }
 
 /// SuperType categories for MCRT events (2 bits: bits 22-23)
@@ -98,15 +104,21 @@ impl RawField for Pipeline {
 pub enum MCRT {
     Interface = 0,
     Reflector = 1,
-    Material  = 2,
+    Material = 2,
     //Custom    = 3,
 }
 
 impl_u8_raw_field!(MCRT);
 impl RawField for MCRT {
-    fn mask() -> u32 { 0x00C00000 }
-    fn shift() -> usize { 22 }
-    fn bitsize() -> usize { 2 }
+    fn mask() -> u32 {
+        0x00C00000
+    }
+    fn shift() -> usize {
+        22
+    }
+    fn bitsize() -> usize {
+        2
+    }
 }
 
 /// SubType for Interface events (bits 16-21)
@@ -127,9 +139,15 @@ pub enum Interface {
 
 impl_u8_raw_field!(Interface);
 impl RawField for Interface {
-    fn mask() -> u32 { 0x003F0000 }
-    fn shift() -> usize { 16 }
-    fn bitsize() -> usize { 6 }
+    fn mask() -> u32 {
+        0x003F0000
+    }
+    fn shift() -> usize {
+        16
+    }
+    fn bitsize() -> usize {
+        6
+    }
 }
 
 /// SubType for Reflector events (bits 16-21)
@@ -142,21 +160,27 @@ impl RawField for Interface {
 #[repr(u8)]
 pub enum Reflector {
     #[num_enum(alternatives = [3])]
-    Diffuse         = 0b000010,  // 00001x
+    Diffuse = 0b000010, // 00001x
     #[num_enum(alternatives = [5])]
-    Specular        = 0b000100,  // 00010x
+    Specular = 0b000100, // 00010x
     #[num_enum(alternatives = [7])]
-    Composite       = 0b000110,  // 00011x
+    Composite = 0b000110, // 00011x
     RetroReflective = 0b001000,
-    CompRetroRef    = 0b001001,
+    CompRetroRef = 0b001001,
     // Custom others
 }
 
 impl_u8_raw_field!(Reflector);
 impl RawField for Reflector {
-    fn mask() -> u32 { 0x003F0000 }
-    fn shift() -> usize { 16 }
-    fn bitsize() -> usize { 6 }
+    fn mask() -> u32 {
+        0x003F0000
+    }
+    fn shift() -> usize {
+        16
+    }
+    fn bitsize() -> usize {
+        6
+    }
 }
 
 /// Material interaction type (bits 20-21)
@@ -168,15 +192,21 @@ impl RawField for Reflector {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Material {
     Absorption = 0b00,
-    Inelastic  = 0b01,
-    Elastic    = 0b10,
+    Inelastic = 0b01,
+    Elastic = 0b10,
 }
 
 impl_u8_raw_field!(Material);
 impl RawField for Material {
-    fn mask() -> u32 { 0x00300000 }
-    fn shift() -> usize { 20 }
-    fn bitsize() -> usize { 2 }
+    fn mask() -> u32 {
+        0x00300000
+    }
+    fn shift() -> usize {
+        20
+    }
+    fn bitsize() -> usize {
+        2
+    }
 }
 
 /// Inelastic scattering type (bits 18-19)
@@ -186,15 +216,21 @@ impl RawField for Material {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Inelastic {
-    Raman        = 0b00,
+    Raman = 0b00,
     Fluorescence = 0b01,
 }
 
 impl_u8_raw_field!(Inelastic);
 impl RawField for Inelastic {
-    fn mask() -> u32 { 0x000C0000 }
-    fn shift() -> usize { 18 }
-    fn bitsize() -> usize { 2 }
+    fn mask() -> u32 {
+        0x000C0000
+    }
+    fn shift() -> usize {
+        18
+    }
+    fn bitsize() -> usize {
+        2
+    }
 }
 
 /// Elastic scattering type (bits 18-19)
@@ -207,16 +243,22 @@ impl RawField for Inelastic {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Elastic {
     HenyeyGreenstein = 0b00,
-    Mie              = 0b01,
-    Rayleigh         = 0b10,
-    SphericalCdf     = 0b11,
+    Mie = 0b01,
+    Rayleigh = 0b10,
+    SphericalCdf = 0b11,
 }
 
 impl_u8_raw_field!(Elastic);
 impl RawField for Elastic {
-    fn mask() -> u32 { 0x000C0000 }
-    fn shift() -> usize { 18 }
-    fn bitsize() -> usize { 2 }
+    fn mask() -> u32 {
+        0x000C0000
+    }
+    fn shift() -> usize {
+        18
+    }
+    fn bitsize() -> usize {
+        2
+    }
 }
 
 /// Scattering direction (bits 16-17)
@@ -229,17 +271,23 @@ impl RawField for Elastic {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum ScatterDir {
-    Unknown  = 0b00,
-    Forward  = 0b01,
-    Side     = 0b10,
+    Unknown = 0b00,
+    Forward = 0b01,
+    Side = 0b10,
     Backward = 0b11,
 }
 
 impl_u8_raw_field!(ScatterDir);
 impl RawField for ScatterDir {
-    fn mask() -> u32 { 0x00030000 }
-    fn shift() -> usize { 16 }
-    fn bitsize() -> usize { 2 }
+    fn mask() -> u32 {
+        0x00030000
+    }
+    fn shift() -> usize {
+        16
+    }
+    fn bitsize() -> usize {
+        2
+    }
 }
 
 #[cfg(test)]
@@ -270,7 +318,7 @@ mod tests {
             Elastic::Rayleigh,
             Elastic::SphericalCdf,
         ];
-        let enc_list = vec![0x00000000, 0x00040000, 0x00080000, 0x000C0000];
+        let enc_list = [0x00000000, 0x00040000, 0x00080000, 0x000C0000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Elastic::decode(*enc), dec);
@@ -280,7 +328,7 @@ mod tests {
     #[test]
     fn inelastic_encoding() {
         let dec_list = vec![Inelastic::Raman, Inelastic::Fluorescence];
-        let enc_list = vec![0x00000000, 0x00040000];
+        let enc_list = [0x00000000, 0x00040000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Inelastic::decode(*enc), dec);
@@ -295,7 +343,7 @@ mod tests {
             ScatterDir::Side,
             ScatterDir::Backward,
         ];
-        let enc_list = vec![0x00000000, 0x00010000, 0x00020000, 0x00030000];
+        let enc_list = [0x00000000, 0x00010000, 0x00020000, 0x00030000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(ScatterDir::decode(*enc), dec);
@@ -305,7 +353,7 @@ mod tests {
     #[test]
     fn material_encoding() {
         let dec_list = vec![Material::Absorption, Material::Inelastic, Material::Elastic];
-        let enc_list = vec![0x00000000, 0x00100000, 0x00200000];
+        let enc_list = [0x00000000, 0x00100000, 0x00200000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Material::decode(*enc), dec);
@@ -315,7 +363,7 @@ mod tests {
     #[test]
     fn mcrt_encoding() {
         let dec_list = vec![MCRT::Interface, MCRT::Reflector, MCRT::Material];
-        let enc_list = vec![0x00000000, 0x00400000, 0x00800000];
+        let enc_list = [0x00000000, 0x00400000, 0x00800000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(MCRT::decode(*enc), dec);
@@ -330,7 +378,7 @@ mod tests {
             Interface::ReEmittance,
             Interface::Boundary,
         ];
-        let enc_list = vec![0x00000000, 0x00010000, 0x00040000];
+        let enc_list = [0x00000000, 0x00010000, 0x00040000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Interface::decode(*enc), dec);
@@ -346,7 +394,7 @@ mod tests {
             Reflector::RetroReflective,
             Reflector::CompRetroRef,
         ];
-        let enc_list = vec![0x00020000, 0x00040000, 0x00060000, 0x00080000, 0x00090000];
+        let enc_list = [0x00020000, 0x00040000, 0x00060000, 0x00080000, 0x00090000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Reflector::decode(*enc), dec);
@@ -361,7 +409,7 @@ mod tests {
             Pipeline::Detection,
             Pipeline::Processing,
         ];
-        let enc_list = vec![0x01000000, 0x03000000, 0x05000000, 0x07000000];
+        let enc_list = [0x01000000, 0x03000000, 0x05000000, 0x07000000];
         for (enc, dec) in enc_list.iter().zip(dec_list) {
             assert_eq!(*enc, dec.encode());
             assert_eq!(Pipeline::decode(*enc), dec);
