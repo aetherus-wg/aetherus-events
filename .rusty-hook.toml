@@ -1,0 +1,8 @@
+# Trigger directly with rusty-hook run --hook <pre-commit|pre-push>
+
+[hooks]
+pre-commit = "./tools/stash-hook.sh 'cargo check && cargo test --all'"
+pre-push = "./tools/stash-hook.sh 'cargo clippy --all-targets --all-features -- -D warnings'"
+
+[logging]
+verbose = true

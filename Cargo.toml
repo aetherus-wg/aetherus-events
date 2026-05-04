@@ -15,10 +15,10 @@ thousands = "0.2.0"
 
 [dev-dependencies]
 anyhow = "1.0.102"
-cargo-husky = "1.5.0"
 criterion = { version = "^0.8.2", features = ["html_reports"] }
 flate2 = "1.1.9"
 rand = "0.10.1"
+rusty-hook = "0.11.2"
 tar = "0.4.45"
 tempfile = "3.23.0"
 
