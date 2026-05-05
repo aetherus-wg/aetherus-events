@@ -269,6 +269,80 @@ where
     dirty: bool,
 }
 
+// Implement a deep copy of the tree and avoid referencing to nodes
+// from the original tree
+impl<T, M> Clone for LedgerTree<T, M>
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
+    fn clone(&self) -> Self {
+        fn clone_node<T, M>(
+            node: &Arc<LedgerNode<T, M>>,
+            parent: Option<Weak<LedgerNode<T, M>>>,
+        ) -> Arc<LedgerNode<T, M>>
+        where
+            T: RawEvent,
+            M: EventMap<T, Arc<LedgerNode<T, M>>>,
+        {
+            let new_node = Arc::new_cyclic(|me| LedgerNode {
+                me: me.clone(),
+                parent,
+                seq_no: node.seq_no.clone(),
+                event: node.event.clone(),
+                next_seq_no: node.next_seq_no.clone(),
+                children: RwLock::new(M::new()),
+                cnt: AtomicU32::new(node.cnt.load(Ordering::Relaxed)),
+            });
+
+            let children = node.children.read().unwrap();
+            for child in children.values() {
+                let child_event = child.event.clone();
+                let new_child = clone_node(child, Some(Arc::downgrade(&new_node)));
+                new_node
+                    .children
+                    .write()
+                    .unwrap()
+                    .insert(child_event, new_child);
+            }
+
+            new_node
+        }
+
+        let root = clone_node(&self.root, None);
+
+        // Rebuild node map
+        let mut node_map      = HashMap::new();
+        let mut resolve_stack = Vec::new();
+        let node = self.root.clone();
+
+        for child in node.children.read().unwrap().values() {
+            resolve_stack.push(child.clone());
+        }
+        while let Some(node) = resolve_stack.pop() {
+            if let Some(uid) = node.uid() {
+                node_map.insert(uid, Arc::downgrade(&node));
+                for child in node.children.read().unwrap().values() {
+                    resolve_stack.push(child.clone());
+                }
+            }
+        }
+
+        Self {
+            grps: self.grps.clone(),
+            src_map: self.src_map.clone(),
+            next_mat_id: self.next_mat_id,
+            next_surf_id: self.next_surf_id,
+            next_matsurf_id: self.next_matsurf_id,
+            next_light_id: self.next_light_id,
+            root,
+            node_map,
+            dirty: self.dirty,
+            next_seq_no: self.next_seq_no,
+        }
+    }
+}
+
 impl<T, M> Default for LedgerTree<T, M>
 where
     T: RawEvent,

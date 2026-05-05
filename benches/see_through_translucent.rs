@@ -116,7 +116,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     prev_node = start_node.clone();
                 }
             }
-            ledger.resolve();
             let _ = black_box(ledger);
         })
     });
@@ -160,9 +159,39 @@ fn criterion_benchmark(c: &mut Criterion) {
                 handle.join().unwrap();
             }
 
-            ledger.resolve();
             let _ = black_box(ledger);
         })
+    });
+
+    let ledger = {
+        let mut ledger = LedgerTree::new();
+        let start_node = ledger.root().insert(events[0]);
+        let mut prev_node = start_node.clone();
+        let mut weight: f64 = 1.0;
+        let min_weight = 0.01;
+
+        for _ in 0..400_000 {
+            let event = events[rng.random_range(1..events.len())];
+            prev_node = prev_node.insert(event);
+
+            weight *= rng.random::<f64>();
+            if weight < min_weight {
+                // Restart a new chain from the start UID
+                weight = 1.0;
+                prev_node = start_node.clone();
+            }
+        }
+        ledger
+    };
+
+    c.bench_function("resolve", |b| {
+        b.iter_batched(|| ledger.clone(), // not timed
+            |mut ledger| {
+                ledger.resolve(); // timed
+                black_box(ledger);
+            },
+            criterion::BatchSize::SmallInput,
+        );
     });
 }
 
