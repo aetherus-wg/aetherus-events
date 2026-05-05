@@ -16,31 +16,40 @@
 //! use aetherus_events::mcrt_event;
 //! use aetherus_events::events::Emission;
 //!
-//! let mut ledger = Ledger::new();
+//! let mut ledger = LedgerTree::new();
 //!
 //! // Insert start event (photon emission)
-//! let start = ledger.insert_start(EventId::new(
+//! let start = ledger.root().insert(EventId::new(
 //!     EventType::Emission(Emission::PointSource),
 //!     SrcId::Light(1)
 //! ));
 //!
 //! // Add subsequent events
-//! let next = ledger.insert(start, EventId::new_mcrt(
+//! let next = start.insert(EventId::new_mcrt(
 //!     mcrt_event!(Material, Elastic, Mie, Forward),
 //!     SrcId::Mat(1)
 //! ));
 //!
+//! // Resolve LedgerTree before accessing
+//! ledger.resolve();
+//!
 //! // Get the chain
-//! let chain = ledger.get_chain(next);
+//! let chain = next.get_chain();
 //! ```
 
-use log::warn;
+use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock, Weak};
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
-use crate::Decode;
+use crate::filter::BitsProperty;
+use crate::maps::EventMap;
+use crate::{Decode, RawEvent};
 use crate::EventId;
 use crate::src::SrcId;
 use crate::uid::Uid;
@@ -64,69 +73,244 @@ pub enum SrcName {
     Detector(String),
 }
 
-// ----------------------------------------------------
-// Definition of Ledger struct and methods
-// ----------------------------------------------------
-// - write ledger to JSON file
-// - Ledger methods:
-//   - Initialise sources: Materials, Surfaces, Lights, etc
-//   - Group sources for batch ID
-//   - insert events and build the event chain
-//   - query events, using the next/prev maps as a doubled linked list
-
-pub fn write_ledger_to_json<P>(ledger: &Ledger, file_path: P) -> Result<(), serde_json::Error>
-where
-    P: AsRef<std::path::Path>,
-{
-    // Write the JSON string to a file
-    let file = File::create(file_path).expect("Unable to create file");
-    serde_json::to_writer_pretty(file, ledger)
+#[derive(Debug)]
+pub struct LedgerNode<T, M> {
+    me:          Weak<LedgerNode<T, M>>,
+    parent:      Option<Weak<LedgerNode<T, M>>>,
+    // Uid = {seq_no, event}
+    seq_no:      OnceCell<u32>,
+    event:       T,
+    next_seq_no: OnceCell<u32>,
+    children:    RwLock<M>,
+    cnt:         AtomicU32,
 }
 
-/// Event ledger for tracking photon event chains.
-///
-/// Maintains a record of all photon events with:
-/// - Source mappings (src_map): Named sources mapped to source IDs
-/// - Event chains (next/prev): Linked lists of event sequences
-/// - Start events (start_events): Root events, which have no previous event cause
-#[serde_as]
-#[derive(Serialize, Deserialize, Default)]
-pub struct Ledger {
-    grps:         HashMap<String, SrcId>, // Key: Group name
-    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
-    src_map:      HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
-    start_events: Vec<Uid>,
+// WARN: We decide to implement Send + Sync here for LedgerNode,
+// assuming that writting of `seq_no` and `next_seq_no` will never happen i
+// during multi-threaded execution
+unsafe impl<T, M> Send for LedgerNode<T, M> {}
+unsafe impl<T, M> Sync for LedgerNode<T, M> {}
+
+impl<T, M> LedgerNode<T, M>
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
+    pub fn root() -> Arc<Self> {
+        Arc::new_cyclic(|me| Self {
+            me:          me.clone(),
+            seq_no:      OnceCell::new(),
+            next_seq_no: 0.into(),
+            event:       T::default(),
+            parent:      None,
+            children:    RwLock::new(M::new()),
+            cnt:         AtomicU32::new(0),
+        })
+    }
+
+    pub fn from_parent(parent: &Arc<Self>, event: T) -> Arc<Self> {
+        let seq_no = parent.next_seq_no.clone();
+        Arc::new_cyclic(|me| Self {
+            me: me.clone(),
+            seq_no,
+            next_seq_no: OnceCell::new(),
+            event,
+            parent: Some(Arc::downgrade(parent)),
+            children: RwLock::new(M::new()),
+            cnt: AtomicU32::new(0),
+        })
+    }
+
+    pub fn new_children(&self, event: T) -> Arc<Self> {
+        let new_node = Self::from_parent(&self.me.upgrade().unwrap(), event.clone());
+        self.children
+            .write()
+            .unwrap()
+            .insert(event, new_node.clone());
+        new_node.clone()
+    }
+
+    //fn with_seq_no(&self, seq_no: u32) {
+    //    self.seq_no.set(seq_no).unwrap_or_else(|_|
+    //        panic!("Failed to set seq_no for node with event _ during ledger tree reconstruction")
+    //    );
+    //}
+
+    fn with_next_seq_no(&self, next_seq_no: u32) {
+        self.next_seq_no.set(next_seq_no).unwrap_or_else(|_|
+            panic!("Failed to set next_seq_no {} for node in ledger tree reconstruction", next_seq_no)
+        );
+    }
+
+    pub fn event(&self) -> &T {
+        &self.event
+    }
+
+    pub fn uid(&self) -> Option<Uid> {
+        self.seq_no
+            .get()
+            .map(|&seq_no| Uid::new(seq_no, self.event.clone().into()))
+    }
+
+    pub fn insert(&self, event: impl Into<T>) -> Arc<Self> {
+        let raw_event = event.into();
+        let mut cnt = self.cnt.load(Ordering::Relaxed);
+        loop {
+            if let Some(next) = self.children.read().unwrap().get(&raw_event) {
+                return next.clone();
+            } else {
+                let mut writer = self.children.write().unwrap();
+                match self.cnt.compare_exchange(cnt, cnt + 1, Ordering::Acquire, Ordering::Relaxed) {
+                    Ok(_) => {
+                        // Successfully reserved the next sequence number, now insert the new node
+                        let new_node =
+                            LedgerNode::from_parent(&self.me.upgrade().unwrap(), raw_event.clone());
+                        writer.insert(raw_event, new_node.clone());
+                        return new_node;
+                    }
+                    Err(e) => cnt = e,
+                }
+            }
+        }
+    }
+
+    pub fn get_chain(&self) -> Vec<Uid> {
+        let mut chain = Vec::new();
+        chain.push(self.uid().unwrap());
+        let mut parent = self.parent.clone();
+        while parent.is_some() {
+            let node = parent.as_ref().unwrap().upgrade().unwrap();
+            // Avoid processing root node
+            if node.seq_no.get().is_some() {
+                let uid = node.uid().unwrap();
+                chain.push(uid);
+                parent = node.parent.clone();
+            } else {
+                parent = None;
+            }
+        }
+        chain.reverse();
+        chain
+    }
+
+    /// WARN: This is meant to be called only with dangling UIDs
+    pub fn prune(&self) {
+        let mut event_type = self.event.clone();
+
+        // 1. First clear all children this node references
+        self.children.write().unwrap().clear();
+
+        // 2. Walk up the tree and remove any reference untill we meet a node that bifurcates
+        let mut node = self.parent.as_ref().unwrap().clone();
+        loop {
+            let access_node = node.upgrade().unwrap();
+            access_node.children.write().unwrap().remove(&event_type);
+            event_type = access_node.event.clone();
+
+            if !access_node.children.read().unwrap().is_empty() {
+                // Biffurcation point, stop pruning
+                break;
+            } else if let Some(parent_ref) = &access_node.parent {
+                node = parent_ref.clone();
+            } else {
+                // Reached the root, stop pruning
+                break;
+            }
+        }
+    }
+
+    pub fn get_end_nodes(&self) -> Vec<Arc<Self>> {
+        let mut end_nodes = Vec::new();
+
+        let mut stack_nodes = Vec::new();
+        stack_nodes.push(self.me.upgrade().unwrap());
+
+        while let Some(node) = stack_nodes.pop() {
+            if node.children.read().unwrap().is_empty() {
+                // Check that this is not the root node
+                if node.next_seq_no.get() != Some(&0) {
+                    end_nodes.push(node);
+                }
+            } else {
+                stack_nodes.extend(
+                    node.children
+                        .read()
+                        .unwrap()
+                        .values()
+                        .cloned()
+                );
+            }
+        }
+        end_nodes
+    }
+}
+
+pub struct LedgerTree<T, M>
+where
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    T: RawEvent,
+{
+    grps:    HashMap<String, SrcId>,       // Key: Group name
+    src_map: HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
 
     next_mat_id:     u16,
     next_surf_id:    u16,
     next_matsurf_id: u16,
     next_light_id:   u16,
 
-    // Use a nested map: (seq_id -> (uid -> next_seq_id)) instead of (seq_id, uid) -> next_seq_id in order to
-    // retrieve be able to do a depth search based on seq_id
-    #[serde_as(as = "HashMap<_, HexInnerMap>")]
-    next:        HashMap<u32, HashMap<u32, u32>>,
-    #[serde_as(as = "HashMap<_, DisplayFromStr>")]
-    prev:        HashMap<u32, Uid>,
-    next_seq_id: u32,
+    next_seq_no: u32,
+
+    // This should be an EventType::Root
+    root:     Arc<LedgerNode<T, M>>,
+    // WARN: This should hold a weak pointer in order to allow cleanup when tree is pruned
+    node_map: HashMap<Uid, Weak<LedgerNode<T, M>>>,
+
+    // Attempts to keep track of when new elements have been added to the Ledger
+    dirty: bool,
 }
 
-impl Ledger {
+impl<T, M> Default for LedgerTree<T, M>
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, M> LedgerTree<T, M>
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
     pub fn new() -> Self {
         Self {
             grps:            HashMap::new(),
             src_map:         HashMap::new(),
-            start_events:    Vec::new(),
             next_mat_id:     0,
             next_surf_id:    0,
             next_matsurf_id: u16::MAX,
             next_light_id:   0,
-            next:            HashMap::new(),
-            prev:            HashMap::new(),
-            next_seq_id:     0,
+            root:            LedgerNode::<T, M>::root(),
+            node_map:        HashMap::new(),
+            dirty:           false,
+            next_seq_no:     1,
         }
     }
-
+    pub fn root(&mut self) -> &Arc<LedgerNode<T, M>> {
+        // The tree might be mutated through the use of root node, hence, we mark it as dirty
+        self.dirty = true;
+        &self.root
+    }
+    fn check_ids(&self) {
+        if self.next_mat_id >= self.next_matsurf_id {
+            warn!("Material ID and Material-Surface ID ranges are overlapping");
+        }
+        if self.next_surf_id >= self.next_matsurf_id {
+            warn!("Surface ID and Material-Surface ID ranges are overlapping");
+        }
+    }
     pub fn with_light(&mut self, light_name: String) -> SrcId {
         let light_id = SrcId::Light(self.next_light_id);
         self.next_light_id += 1;
@@ -310,153 +494,56 @@ impl Ledger {
         src_id
     }
 
-    pub fn insert_start(&mut self, start_event: impl Into<u32>) -> Uid {
-        let uid = Uid::new(0, start_event.into());
-
-        if self.insert_entry(uid, 1) {
-            self.start_events.push(uid);
+    fn check_dirty(&self) {
+        if self.dirty {
+            error!("Ledger is dirty, get_chain may return incomplete results! Run `ledger.resolve()` before");
         }
-
-        if self.next_seq_id == 0 {
-            self.next_seq_id = 2;
-        }
-
-        uid
     }
 
-    // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
-    // happen unless the simulation scene is extremely complex
-    pub fn insert(&mut self, prev_event: Uid, event: impl Into<u32>) -> Uid {
-        // Push a new entry in next with the new_event UID if it doesn't exist already and
-        //    set count to 1
-        // Obs: seq_id=0 is reserved for root identification, hence all new events with no
-        // previous cause start with seq_id=0
-        let next_seq_id = self
-            .get_next_seq_id(&prev_event)
-            .ok_or("Previous event not found in ledger")
-            .unwrap();
+    pub fn resolve(&mut self) {
+        let mut resolve_stack: Vec<(Arc<LedgerNode<T, M>>, u32)> = Vec::new();
+        let node = self.root.clone();
 
-        let uid = Uid::new(next_seq_id, event.into());
-
-        // FIXME: This is the only portion of the Ledger that needs to be accessed concurently.
-        // Then we should encapsulate this section to run it atomically, then the Ledger can
-        // implement Send + Sync traits safely without Arc<Mutex>
-        if self.insert_entry(uid, self.next_seq_id) {
-            self.next_seq_id += 1;
+        for child in node.children.read().unwrap().values() {
+            resolve_stack.push((child.clone(), *node.next_seq_no.get_or_init(|| 0)));
         }
 
-        uid
-    }
+        while let Some((node, seq_no)) = resolve_stack.pop() {
+            let set_seq_no = *node.seq_no.get_or_init(|| seq_no);
+            assert_eq!(
+                set_seq_no, seq_no,
+                "Sequence number mismatch during ledger resolution, set vs expected"
+            );
 
-    /// WARN: This is meant to be called only with dangling UIDs
-    pub fn prune(&mut self, uid: &Uid) {
-        let mut bifurcate = false;
-        let mut current_uid = *uid;
+            let next_seq_no = *node.next_seq_no.get_or_init(|| {
+                let seq_no = self.next_seq_no;
+                self.next_seq_no += 1;
+                seq_no
+            });
 
-        while !bifurcate {
-            self.next
-                .get_mut(&current_uid.seq_id)
-                .map(|map| map.remove(&current_uid.event));
+            self.node_map
+                .insert(node.uid().unwrap(), Arc::downgrade(&node));
 
-            if let Some(prev_uid) = self.prev.get(&current_uid.seq_id).cloned() {
-                bifurcate = match self.next.get(&current_uid.seq_id) {
-                    Some(next_map) => !next_map.is_empty(),
-                    None => {
-                        panic!(
-                            "Inconsistent Ledger state: missing next entry for seq_id {}",
-                            current_uid.seq_id
-                        );
-                    }
-                };
-
-                if !bifurcate {
-                    self.prev.remove(&current_uid.seq_id);
-                    self.next.remove(&current_uid.seq_id);
-                }
-
-                current_uid = prev_uid;
-            } else {
-                panic!(
-                    "Inconsistent Ledger state: missing prev entry for seq_id {}",
-                    current_uid.seq_id
-                );
+            for child in node.children.read().unwrap().values() {
+                resolve_stack.push((child.clone(), next_seq_no));
             }
         }
+
+        self.dirty = false;
     }
 
-    pub fn get_dangling_uids(&self) -> Vec<Uid> {
-        let mut dangling_uids = Vec::new();
-        for (seq_id, map) in &self.next {
-            if map.is_empty() && let Some(uid) = self.prev.get(seq_id)
-            {
-                dangling_uids.push(*uid);
-            }
-        }
-        dangling_uids
-    }
-
-    fn insert_entry(&mut self, uid: Uid, next_seq_id: u32) -> bool {
-        if self.get_next_seq_id(&uid).is_none() {
-            self.next.entry(uid.seq_id).or_default();
-            self.next
-                .get_mut(&uid.seq_id)
-                .unwrap()
-                .insert(uid.event, next_seq_id);
-            self.prev.insert(next_seq_id, uid);
-            // Prepare the next seq_id entry
-            self.next.insert(next_seq_id, HashMap::new());
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn get_start_events(&self) -> &Vec<Uid> {
-        &self.start_events
-    }
-
-    pub fn get_next_seq_id(&self, uid: &Uid) -> Option<u32> {
-        match self.next.get(&uid.seq_id) {
-            None => None,
-            Some(map) => map.get(&uid.event).cloned(),
-        }
-    }
     pub fn get_next(&self, uid: &Uid) -> Vec<Uid> {
-        let mut next_uids = Vec::new();
-        if let Some(next_seq_id) = self.get_next_seq_id(uid)
-            && let Some(map) = self.next.get(&next_seq_id)
-        {
-            for next_event in map.keys() {
-                let next_uid = Uid::new(next_seq_id, *next_event);
-                next_uids.push(next_uid);
-            }
-        }
-        next_uids
-    }
-
-    pub fn get_prev(&self, seq_id: u32) -> Option<Uid> {
-        self.prev.get(&seq_id).cloned()
-    }
-
-    pub fn get_chain(&self, last_uid: Uid) -> Vec<Uid> {
-        let mut chain = Vec::new();
-        chain.push(last_uid);
-        let mut seq_id = last_uid.seq_id;
-        while let Some(uid) = self.get_prev(seq_id) {
-            chain.push(uid);
-            seq_id = uid.seq_id;
-        }
-        chain.reverse();
-        chain
-    }
-
-    fn check_ids(&self) {
-        if self.next_mat_id >= self.next_matsurf_id {
-            warn!("Material ID and Material-Surface ID ranges are overlapping");
-        }
-        if self.next_surf_id >= self.next_matsurf_id {
-            warn!("Surface ID and Material-Surface ID ranges are overlapping");
-        }
+        self.check_dirty();
+        let node = self
+            .node_map
+            .get(uid)
+            .unwrap_or_else(|| panic!("UID {} not found in ledger", uid));
+        let access_node = node.upgrade().unwrap();
+        let children_map = access_node.children.read().unwrap();
+        children_map
+            .values()
+            .map(|node| node.uid().unwrap())
+            .collect()
     }
 
     pub fn get_src_dict(&self) -> HashMap<SrcName, SrcId> {
@@ -467,6 +554,19 @@ impl Ledger {
             }
         }
         src_dict
+    }
+
+    pub fn get_chain(&self, uid: &Uid) -> Vec<Uid> {
+        self.check_dirty();
+        if let Some(node) = self.node_map.get(uid) {
+            if let Some(node) = node.upgrade() {
+                node.get_chain()
+            } else {
+                panic!("UID {} not found in ledger", uid);
+            }
+        } else {
+            panic!("UID {} not found in ledger", uid);
+        }
     }
 
     pub fn emit_dot<'a, I>(&self, uids: I) -> String
@@ -487,7 +587,7 @@ impl Ledger {
         let with_cnt = !freq_dict.is_empty();
 
         for uid in uids {
-            let chain_uids = self.get_chain(*uid);
+            let chain_uids = self.get_chain(uid);
             for chain_uid in chain_uids.iter() {
                 let event = EventId::decode(chain_uid.event);
                 if !nodes.contains(chain_uid) {
@@ -525,12 +625,287 @@ impl Ledger {
         dot.push_str("}\n");
         dot
     }
+
+    pub fn prune_node(&mut self, node: &Arc<LedgerNode<T, M>>) {
+        self.check_dirty();
+        if let Some(uid) = node.uid() {
+            self.node_map.remove(&uid);
+        }
+        node.prune();
+    }
+
+    pub fn prune_uid(&mut self, uid: &Uid) {
+        self.check_dirty();
+        if let Some(node) = self.node_map.get(uid) {
+            if let Some(node) = node.upgrade() {
+                self.prune_node(&node);
+            } else {
+                panic!("UID {} not found in ledger", uid);
+            }
+        } else {
+            panic!("UID {} not found in ledger", uid);
+        }
+    }
+
+    pub fn get_dangling_uids(&self) -> Vec<Uid> {
+        self.check_dirty();
+        let end_nodes = self.root.get_end_nodes();
+        end_nodes.iter().map(|node| node.uid().unwrap()).collect()
+    }
+
+    pub fn get_node(&self, uid: &Uid) -> Option<Arc<LedgerNode<T, M>>> {
+        self.check_dirty();
+        if let Some(node) = self.node_map.get(uid) {
+            node.upgrade()
+        } else {
+            None
+        }
+    }
+
+    pub fn find_dangling_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
+        let mut found_uids: Vec<Uid> = Vec::new();
+        for end_node in self.root.get_end_nodes() {
+            let uid = end_node.uid().unwrap();
+            if bits_property.matches(uid.event) {
+                found_uids.push(uid);
+            }
+        }
+        found_uids
+    }
+}
+
+impl<T, M> From<LedgerTree<T, M>> for Ledger
+where
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    T: RawEvent,
+{
+    fn from(tree: LedgerTree<T, M>) -> Self {
+        Self::from(&tree)
+    }
+}
+
+impl<T, M> From<&LedgerTree<T, M>> for Ledger
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
+    fn from(tree: &LedgerTree<T, M>) -> Self {
+        let mut ledger = Ledger::new();
+
+        ledger.grps            = tree.grps.clone();
+        ledger.src_map         = tree.src_map.clone();
+        ledger.next_mat_id     = tree.next_mat_id;
+        ledger.next_surf_id    = tree.next_surf_id;
+        ledger.next_matsurf_id = tree.next_matsurf_id;
+        ledger.next_light_id   = tree.next_light_id;
+        ledger.next_seq_id     = tree.next_seq_no;
+
+        // Traverse the resolved tree and reconstruct next / prev maps.
+        // We do a DFS from the root.
+        let mut stack = vec![];
+        for child in tree.root.children.read().unwrap().values() {
+            ledger.insert_start(child.uid().unwrap());
+            stack.push((child.uid().unwrap(), child.clone()));
+        }
+
+        while let Some((prev_uid, node)) = stack.pop() {
+            for child in node.children.read().unwrap().values() {
+                ledger.insert(
+                    prev_uid,
+                    child.uid().unwrap(),
+                    *child.next_seq_no.get().unwrap(),
+                );
+                stack.push((child.uid().unwrap(), child.clone()));
+            }
+        }
+
+        ledger
+    }
+}
+
+impl<T, M> From<Ledger> for LedgerTree<T, M>
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
+    fn from(value: Ledger) -> Self {
+        Self::from(&value)
+    }
+}
+
+impl<T, M> From<&Ledger> for LedgerTree<T, M>
+where
+    T: RawEvent,
+    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+{
+    fn from(value: &Ledger) -> Self {
+        let mut tree = LedgerTree::<T, M>::new();
+
+        tree.grps            = value.grps.clone();
+        tree.src_map         = value.src_map.clone();
+        tree.next_mat_id     = value.next_mat_id;
+        tree.next_surf_id    = value.next_surf_id;
+        tree.next_matsurf_id = value.next_matsurf_id;
+        tree.next_light_id   = value.next_light_id;
+        tree.next_seq_no     = value.next_seq_id;
+
+        // Rebuild root
+        tree.root = LedgerNode::<T, M>::root();
+
+        let mut stack = Vec::new();
+
+        for &uid in value.start_events().iter() {
+            let node = tree.root.new_children(uid.event.into());
+            tree.node_map.insert(uid, Arc::downgrade(&node));
+
+            stack.push((uid, node.clone()));
+        }
+
+        while let Some((prev_uid, parent_node)) = stack.pop() {
+            if let Some(next_seq_no) = value.get_next_seq_id(&prev_uid) {
+                parent_node.with_next_seq_no(next_seq_no);
+            }
+
+            for uid in value.get_next(&prev_uid) {
+                let new_node = parent_node.new_children(uid.event.into());
+                tree.node_map.insert(uid, Arc::downgrade(&new_node));
+
+                stack.push((uid, new_node.clone()));
+            }
+        }
+
+        tree.dirty = false;
+        tree
+    }
+}
+
+// ----------------------------------------------------
+// Definition of Ledger struct and methods
+// ----------------------------------------------------
+// - write ledger to JSON file
+// - Ledger methods:
+//   - Initialise sources: Materials, Surfaces, Lights, etc
+//   - Group sources for batch ID
+//   - insert events and build the event chain
+//   - query events, using the next/prev maps as a doubled linked list
+
+pub fn write_ledger_to_json<P>(ledger: &Ledger, file_path: P) -> Result<(), serde_json::Error>
+where
+    P: AsRef<std::path::Path>,
+{
+    // Write the JSON string to a file
+    let file = File::create(file_path).expect("Unable to create file");
+    serde_json::to_writer_pretty(file, ledger)
+}
+
+/// Event ledger for tracking photon event chains.
+///
+/// Maintains a record of all photon events with:
+/// - Source mappings (src_map): Named sources mapped to source IDs
+/// - Event chains (next/prev): Linked lists of event sequences
+/// - Start events (start_events): Root events, which have no previous event cause
+#[serde_as]
+#[derive(Serialize, Deserialize, Default)]
+pub struct Ledger {
+    grps:         HashMap<String, SrcId>, // Key: Group name
+    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
+    src_map:      HashMap<SrcId, Vec<SrcName>>, // Value: Material name, object name, light name.
+    start_events: Vec<Uid>,
+
+    next_mat_id:     u16,
+    next_surf_id:    u16,
+    next_matsurf_id: u16,
+    next_light_id:   u16,
+
+    // Use a nested map: (uid.seq_id -> (uid.event -> next_seq_id)) instead of uid -> next_seq_id
+    // in order to retrive children of an event easily. This enables a tree search.
+    #[serde_as(as = "HashMap<_, HexInnerMap>")]
+    next:        HashMap<u32, HashMap<u32, u32>>,
+    #[serde_as(as = "HashMap<_, DisplayFromStr>")]
+    prev:        HashMap<u32, Uid>,
+    next_seq_id: u32,
+}
+
+impl Ledger {
+    pub fn new() -> Self {
+        Self {
+            grps:            HashMap::new(),
+            src_map:         HashMap::new(),
+            start_events:    Vec::new(),
+            next_mat_id:     0,
+            next_surf_id:    0,
+            next_matsurf_id: u16::MAX,
+            next_light_id:   0,
+            next:            HashMap::new(),
+            prev:            HashMap::new(),
+            next_seq_id:     0,
+        }
+    }
+
+    pub fn start_events(&self) -> &Vec<Uid> {
+        &self.start_events
+    }
+
+    pub fn insert_start(&mut self, uid: Uid) {
+        self.insert_entry(uid, 1);
+        self.start_events.push(uid);
+    }
+
+    // WARN: next_seq_id increment overflows silently in release mode, however that is unlikely to
+    // happen unless the simulation scene is extremely complex
+    pub fn insert(&mut self, prev_event: Uid, next_event: Uid, next_next_seq_no: u32) {
+        // Push a new entry in next with the new_event UID
+        // Obs: seq_id=0 is reserved for root identification, hence all new events with no
+        // previous cause start with seq_id=0
+        let next_seq_id = self
+            .get_next_seq_id(&prev_event)
+            .ok_or("Previous event not found in ledger")
+            .unwrap();
+        assert_eq!(
+            next_seq_id, next_event.seq_id,
+            "Previous event next_seq_no and new event seq_no don't match"
+        );
+
+        self.insert_entry(next_event, next_next_seq_no);
+    }
+
+    fn insert_entry(&mut self, uid: Uid, next_seq_id: u32) {
+        assert!(self.get_next_seq_id(&uid).is_none());
+        self.next.entry(uid.seq_id).or_default();
+        self.next
+            .get_mut(&uid.seq_id)
+            .unwrap()
+            .insert(uid.event, next_seq_id);
+        self.prev.insert(next_seq_id, uid);
+        // Prepare the next seq_id entry
+        self.next.insert(next_seq_id, HashMap::new());
+    }
+
+    pub fn get_next_seq_id(&self, uid: &Uid) -> Option<u32> {
+        match self.next.get(&uid.seq_id) {
+            None => None,
+            Some(map) => map.get(&uid.event).cloned(),
+        }
+    }
+
+    pub fn get_next(&self, uid: &Uid) -> Vec<Uid> {
+        let mut next_uids = Vec::new();
+        if let Some(next_seq_id) = self.get_next_seq_id(uid)
+            && let Some(map) = self.next.get(&next_seq_id)
+        {
+            for next_event in map.keys() {
+                let next_uid = Uid::new(next_seq_id, *next_event);
+                next_uids.push(next_uid);
+            }
+        }
+        next_uids
+    }
 }
 
 // ----------------------------------------------------
 // Helper methods and structs
 // ----------------------------------------------------
-// - Custom serializer/deserializer for BTreeMap<u32, u32> with hex keys
+// - Custom serializer/deserializer for HashMap<u32, u32> with hex keys
 
 pub struct HexInnerMap;
 
@@ -592,6 +967,7 @@ mod tests {
     use crate::events::Emission;
     use crate::events::EventType;
     use crate::filter::BitsProperty;
+    use crate::maps::SmallMap;
     use crate::mcrt_event;
     use crate::pattern;
 
@@ -614,75 +990,80 @@ mod tests {
             ("obj3".to_string(), "mat1".to_string()),
         ];
 
-        let mut ledger = Ledger::new();
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         for mat in mats {
-            let src_id = ledger.with_mat(mat.clone());
-            assert!(ledger.src_map.contains_key(&src_id));
+            let src_id = ledger_tree.with_mat(mat.clone());
+            assert!(ledger_tree.src_map.contains_key(&src_id));
             assert_eq!(
-                ledger
-                    .src_map
-                    .get(&src_id)
-                    .unwrap()
-                    .to_vec(),
+                ledger_tree.src_map.get(&src_id).unwrap().to_vec(),
                 vec![SrcName::Mat(mat.clone())]
             );
         }
 
         for surf in surfs {
-            let src_id = ledger.with_surf(surf.clone(), None);
-            assert!(ledger.src_map.contains_key(&src_id));
+            let src_id = ledger_tree.with_surf(surf.clone(), None);
+            assert!(ledger_tree.src_map.contains_key(&src_id));
             assert_eq!(
-                ledger
-                    .src_map
-                    .get(&src_id)
-                    .unwrap()
-                    .to_vec(),
+                ledger_tree.src_map.get(&src_id).unwrap().to_vec(),
                 vec![SrcName::Surf(surf.clone())]
             );
         }
 
         for (obj, mat) in objects {
-            let src_id = ledger.with_matsurf(obj.clone(), mat.clone(), None);
-            assert!(ledger.src_map.contains_key(&src_id));
+            let src_id = ledger_tree.with_matsurf(obj.clone(), mat.clone(), None);
+            assert!(ledger_tree.src_map.contains_key(&src_id));
             let expected_name = format!("{}:{}", obj.clone(), mat.clone());
             assert_eq!(
-                ledger
-                    .src_map
-                    .get(&src_id)
-                    .unwrap()
-                    .to_vec(),
+                ledger_tree.src_map.get(&src_id).unwrap().to_vec(),
                 vec![SrcName::MatSurf(expected_name)]
             );
         }
 
+        let ledger = Ledger::from(&ledger_tree);
+
+        assert_eq!(ledger.src_map, ledger_tree.src_map);
+        assert_eq!(ledger.grps, ledger_tree.grps);
+
         // Inspect the ledger
-        println!("Ledger src_map: {:?}", ledger.src_map);
+        println!("Ledger src_map: {:?}", ledger_tree.src_map);
     }
 
     #[test]
     fn insert_events() {
-        let mut ledger = Ledger::new();
+        let mut ledger = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+        let root_node = ledger.root();
+
         let emission_event = EventId {
             event_type: EventType::Emission(Emission::PointSource),
             src_id:     SrcId::Light(2),
         };
-        let uid1 = ledger.insert_start(emission_event);
-        assert_eq!(uid1.seq_id, 0);
+        let node1 = root_node.insert(emission_event);
+
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Material, Elastic, HenyeyGreenstein, Forward)),
             src_id:     SrcId::Mat(2),
         };
-        let uid2 = ledger.insert(uid1, mcrt_event);
-        assert_eq!(uid2.seq_id, 1);
+        let node2 = node1.insert(mcrt_event);
+
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
             src_id:     SrcId::Mat(2),
         };
-        let uid3 = ledger.insert(uid2, mcrt_event);
+        let node3 = node2.insert(mcrt_event);
+
+        ledger.resolve();
+
+        let uid1 = node1.uid().unwrap();
+        let uid2 = node2.uid().unwrap();
+        let uid3 = node3.uid().unwrap();
+
+        assert_eq!(uid1.seq_id, 0);
+        assert_eq!(uid2.seq_id, 1);
         assert_eq!(uid3.seq_id, 2);
+
         // Check the chain
-        let chain = ledger.get_chain(uid3);
+        let chain = ledger.get_chain(&uid3);
         println!("Chain: {:?}", chain);
         println!(
             "Chain: {:?}",
@@ -702,31 +1083,74 @@ mod tests {
     }
 
     #[test]
-    fn write_ledger_json() {
-        let mut ledger = Ledger::new();
-        let surf_src_id = ledger.with_surf("surface1".to_string(), Some("group1".to_string()));
-        let mat_src_id = ledger.with_mat("material1".to_string());
-        // TODO: Complete the entire implementation to test the json writer
+    fn ledger_and_ledger_tree_conversion() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+        let surf_src_id = ledger_tree.with_surf("surface1".to_string(), Some("group1".to_string()));
+        let mat_src_id = ledger_tree.with_mat("material1".to_string());
         let emission_event = EventId {
             event_type: EventType::Emission(Emission::PointSource),
             src_id:     SrcId::Light(1),
         };
-        let uid1 = ledger.insert_start(emission_event);
+        let node1 = ledger_tree.root().insert(emission_event);
 
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Interface, Refraction)),
             src_id:     surf_src_id,
         };
-        let uid2 = ledger.insert(uid1, mcrt_event);
+        let node2 = node1.insert(mcrt_event);
 
-        assert_eq!(uid2.seq_id, 1);
         let mcrt_event = EventId {
             event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
             src_id:     mat_src_id,
         };
-        let uid3 = ledger.insert(uid2, mcrt_event);
+        let _node3 = node2.insert(mcrt_event);
 
-        let chain = ledger.get_chain(uid3);
+        ledger_tree.resolve();
+
+        let ledger: Ledger = ledger_tree.into();
+
+        let ledger_tree_read: LedgerTree<u32, SmallMap<u32, 8>> = (&ledger).into();
+        let ledger_clone: Ledger = ledger_tree_read.into();
+
+        assert_eq!(ledger.grps,         ledger_clone.grps);
+        assert_eq!(ledger.src_map,      ledger_clone.src_map);
+        assert_eq!(ledger.start_events, ledger_clone.start_events);
+        assert_eq!(ledger.next,         ledger_clone.next);
+        assert_eq!(ledger.prev,         ledger_clone.prev);
+    }
+
+    #[test]
+    fn write_ledger_json() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+        let surf_src_id = ledger_tree.with_surf("surface1".to_string(), Some("group1".to_string()));
+        let mat_src_id = ledger_tree.with_mat("material1".to_string());
+        let emission_event = EventId {
+            event_type: EventType::Emission(Emission::PointSource),
+            src_id:     SrcId::Light(1),
+        };
+        let node1 = ledger_tree.root().insert(emission_event);
+
+        let mcrt_event = EventId {
+            event_type: EventType::MCRT(mcrt_event!(Interface, Refraction)),
+            src_id:     surf_src_id,
+        };
+        let node2 = node1.insert(mcrt_event);
+
+        let mcrt_event = EventId {
+            event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
+            src_id:     mat_src_id,
+        };
+        let node3 = node2.insert(mcrt_event);
+
+        ledger_tree.resolve();
+
+        let uid2 = node2.uid().unwrap();
+        let uid3 = node3.uid().unwrap();
+
+        assert_eq!(uid2.seq_id, 1);
+        assert_eq!(uid3.seq_id, 2);
+
+        let chain = ledger_tree.get_chain(&uid3);
         println!(
             "Chain: {:?}",
             chain
@@ -738,6 +1162,8 @@ mod tests {
                 ))
                 .collect::<Vec<String>>()
         );
+
+        let ledger: Ledger = ledger_tree.into();
 
         // Create a temporary directory
         let temp_dir = tempdir().expect("Failed to create temporary directory");
@@ -763,68 +1189,60 @@ mod tests {
             // serde_json::from_reader(file).expect("Unable to parse ledger file")
         };
 
-        assert_eq!(ledger.grps, stored_ledger.grps);
-        assert_eq!(ledger.src_map, stored_ledger.src_map);
+        assert_eq!(ledger.grps,         stored_ledger.grps);
+        assert_eq!(ledger.src_map,      stored_ledger.src_map);
         assert_eq!(ledger.start_events, stored_ledger.start_events);
-        assert_eq!(ledger.next, stored_ledger.next);
-        assert_eq!(ledger.prev, stored_ledger.prev);
+        assert_eq!(ledger.next,         stored_ledger.next);
+        assert_eq!(ledger.prev,         stored_ledger.prev);
     }
 
     #[test]
     fn test_prune_dangling_uids() {
-        let mut ledger = Ledger::new();
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
-        let event = ledger.insert_start(EventId::new(EventType::Detection, SrcId::None));
-        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
-        let _event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+        let node1 = ledger_tree.root().insert(EventId::new(EventType::Detection, SrcId::None));
+        let node2 = node1.insert(EventId::new(EventType::Detection, SrcId::None));
+        let _node3 = node2.insert(EventId::new(EventType::Detection, SrcId::None));
 
-        let result = ledger.get_dangling_uids();
-        assert_eq!(result.len(), 1,
+        ledger_tree.resolve();
+
+        let result = ledger_tree.get_dangling_uids();
+        assert_eq!(
+            result.len(), 1,
             "Expected exactly one dangling UID in a simple chain"
         );
     }
 
     #[test]
     fn test_prune_until_bifurcation() {
-        let mut ledger = Ledger::new();
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
-        let uid_0 =
-            ledger.insert_start(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
-        let uid_1 = ledger.insert(
-            uid_0,
-            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
-        );
+        let node_0     = ledger_tree.root()
+            .insert(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
+        let node_1     = node_0
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
 
-        let uid_21 = ledger.insert(
-            uid_1,
-            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
-        );
-        let uid_22 = ledger.insert(
-            uid_21,
-            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
-        );
-        let _uid_231 = ledger.insert(
-            uid_22,
-            EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)),
-        );
-        let uid_232 = ledger.insert(
-            uid_22,
-            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
-        );
-        let _uid_2321 = ledger.insert(
-            uid_232,
-            EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)),
-        );
+        let node_21    = node_1
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let node_22    = node_21
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let _node_231  = node_22
+            .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+        let node_232   = node_22
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let _node_2321 = node_232
+            .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
 
-        let uid_31 = ledger.insert(
-            uid_1,
-            EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)),
-        );
-        let _uid_32 = ledger.insert(uid_31, EventId::new(EventType::Detection, SrcId::Surf(1)));
+        let node_31    = node_1
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let _node_32   = node_31
+            .insert(EventId::new(EventType::Detection, SrcId::Surf(1)));
 
-        let dangling_uids = ledger.get_dangling_uids();
+        ledger_tree.resolve();
+
+        let dangling_uids = ledger_tree.get_dangling_uids();
         assert_eq!(dangling_uids.len(), 3, "Expected dangling UIDs");
         let dangling_lost_uids = dangling_uids
             .into_iter()
@@ -841,9 +1259,13 @@ mod tests {
 
         //println!("{:?}", ledger);
 
-        for uid in dangling_lost_uids {
+        for uid in dangling_lost_uids.iter() {
             println!("Pruning UID: {:?}", uid);
-            ledger.prune(&uid);
+            ledger_tree.prune_uid(uid);
+        }
+
+        for uid in dangling_lost_uids.iter() {
+            assert!(ledger_tree.get_node(uid).is_none());
         }
     }
 }

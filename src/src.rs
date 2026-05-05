@@ -60,6 +60,10 @@ impl RawField for SrcId {
                 warn!("Processing pipeline does not have SrcId associated.");
                 SrcId::None
             }
+            Pipeline::Root => {
+                warn!("Processing pipeline does not have SrcId associated.");
+                SrcId::None
+            }
         }
     }
     fn encode(&self) -> u32 {
