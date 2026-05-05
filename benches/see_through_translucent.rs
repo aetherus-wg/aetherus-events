@@ -106,7 +106,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             let min_weight = 0.01;
 
             for _ in 0..100_000 {
-                let event = events[rng.random_range(0..events.len())];
+                let event = events[rng.random_range(1..events.len())];
                 prev_uid = ledger.insert(prev_uid, event);
 
                 weight *= rng.random::<f64>();
@@ -145,7 +145,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     let min_weight = 0.01;
 
                     for _ in 0..events_per_thread {
-                        let event = events_clone[rng.random_range(0..events_clone.len())];
+                        let event = events_clone[rng.random_range(1..events_clone.len())];
                         prev_uid = {
                             let mut ledger = ledger_clone.lock().unwrap();
                             ledger.insert(prev_uid, event)
