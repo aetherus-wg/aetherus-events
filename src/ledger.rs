@@ -130,6 +130,15 @@ where
         new_node.clone()
     }
 
+    pub fn children(&self) -> Vec<Arc<Self>> {
+        self.children
+            .read()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect()
+    }
+
     //fn with_seq_no(&self, seq_no: u32) {
     //    self.seq_no.set(seq_no).unwrap_or_else(|_|
     //        panic!("Failed to set seq_no for node with event _ during ledger tree reconstruction")
