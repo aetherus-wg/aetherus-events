@@ -74,7 +74,7 @@ impl Default for EventId {
     fn default() -> Self {
         EventId {
             event_type: EventType::Root,
-            src_id: SrcId::None,
+            src_id:     SrcId::None,
         }
     }
 }

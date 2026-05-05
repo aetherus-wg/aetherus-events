@@ -492,7 +492,9 @@ mod tests {
         let mut ledger = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
-        let node = ledger.root().insert(EventId::new(EventType::Detection, SrcId::None));
+        let node = ledger
+            .root()
+            .insert(EventId::new(EventType::Detection, SrcId::None));
         let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
         let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
         ledger.resolve();
@@ -508,7 +510,9 @@ mod tests {
         let mut ledger = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
-        let node = ledger.root().insert(EventId::new(EventType::Detection, SrcId::None));
+        let node = ledger
+            .root()
+            .insert(EventId::new(EventType::Detection, SrcId::None));
         let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
         let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
         ledger.resolve();

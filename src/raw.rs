@@ -78,9 +78,9 @@ macro_rules! impl_u8_raw_field {
 /// Codes use reserved bits: bit 0 = 1 (required), bit 3 = 0 (required)
 /// allowing custom stages to be interleaved at bit positions 1-2.
 pub enum Pipeline {
-    Emission = 1,
-    MCRT = 3,
-    Detection = 5,
+    Emission   = 1,
+    MCRT       = 3,
+    Detection  = 5,
     Processing = 7,
     // Other codes are free to be used for custom pipeline stages
     Root       = 0xf,
@@ -105,7 +105,7 @@ impl RawField for Pipeline {
 pub enum MCRT {
     Interface = 0,
     Reflector = 1,
-    Material = 2,
+    Material  = 2,
     //Custom    = 3,
 }
 
@@ -131,10 +131,10 @@ impl RawField for MCRT {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 #[repr(u8)]
 pub enum Interface {
-    Reflection = 0,
-    Refraction = 1,
+    Reflection  = 0,
+    Refraction  = 1,
     ReEmittance = 4,
-    Boundary = 8,
+    Boundary    = 8,
     // Custom 32-63
 }
 
@@ -161,13 +161,13 @@ impl RawField for Interface {
 #[repr(u8)]
 pub enum Reflector {
     #[num_enum(alternatives = [3])]
-    Diffuse = 0b000010, // 00001x
+    Diffuse         = 0b000010, // 00001x
     #[num_enum(alternatives = [5])]
-    Specular = 0b000100, // 00010x
+    Specular        = 0b000100, // 00010x
     #[num_enum(alternatives = [7])]
-    Composite = 0b000110, // 00011x
+    Composite       = 0b000110, // 00011x
     RetroReflective = 0b001000,
-    CompRetroRef = 0b001001,
+    CompRetroRef    = 0b001001,
     // Custom others
 }
 
@@ -193,8 +193,8 @@ impl RawField for Reflector {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Material {
     Absorption = 0b00,
-    Inelastic = 0b01,
-    Elastic = 0b10,
+    Inelastic  = 0b01,
+    Elastic    = 0b10,
 }
 
 impl_u8_raw_field!(Material);
@@ -217,7 +217,7 @@ impl RawField for Material {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Inelastic {
-    Raman = 0b00,
+    Raman        = 0b00,
     Fluorescence = 0b01,
 }
 
@@ -244,9 +244,9 @@ impl RawField for Inelastic {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum Elastic {
     HenyeyGreenstein = 0b00,
-    Mie = 0b01,
-    Rayleigh = 0b10,
-    SphericalCdf = 0b11,
+    Mie              = 0b01,
+    Rayleigh         = 0b10,
+    SphericalCdf     = 0b11,
 }
 
 impl_u8_raw_field!(Elastic);
@@ -272,9 +272,9 @@ impl RawField for Elastic {
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, TryFromPrimitive, IntoPrimitive)]
 pub enum ScatterDir {
-    Unknown = 0b00,
-    Forward = 0b01,
-    Side = 0b10,
+    Unknown  = 0b00,
+    Forward  = 0b01,
+    Side     = 0b10,
     Backward = 0b11,
 }
 
