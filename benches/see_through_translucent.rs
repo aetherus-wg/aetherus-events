@@ -59,26 +59,26 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     // Top 20 most frequent UIDs in the ledger (these would be determined by analyzing the ledger beforehand)
     let uids = vec![
-        Uid::new(138, 0x05000000),
-        Uid::new(464, 0x05000000),
-        Uid::new(547, 0x05000000),
-        Uid::new(403, 0x05000000),
-        Uid::new(1311, 0x05000000),
-        Uid::new(504, 0x05000000),
-        Uid::new(804, 0x05000000),
-        Uid::new(289, 0x05000000),
-        Uid::new(967, 0x05000000),
-        Uid::new(180, 0x05000000),
-        Uid::new(860, 0x05000000),
-        Uid::new(1142, 0x05000000),
-        Uid::new(1353, 0x05000000),
-        Uid::new(1768, 0x05000000),
-        Uid::new(935, 0x05000000),
-        Uid::new(1169, 0x05000000),
-        Uid::new(1027, 0x05000000),
-        Uid::new(5102, 0x05000000),
-        Uid::new(2176, 0x05000000),
-        Uid::new(10629, 0x05000000),
+        Uid::new(4014, 0x05000000_u32), // 64
+        Uid::new(2573, 0x05000000_u32), // 68
+        Uid::new(5521, 0x05000000_u32), // 77
+        Uid::new(4174, 0x05000000_u32), // 83
+        Uid::new(7977, 0x05000000_u32), // 83
+        Uid::new(5520, 0x05000000_u32), // 107
+        Uid::new(3928, 0x05000000_u32), // 109
+        Uid::new(5459, 0x05000000_u32), // 118
+        Uid::new(1851, 0x05000000_u32), // 125
+        Uid::new(4088, 0x05000000_u32), // 129
+        Uid::new(3127, 0x05000000_u32), // 136
+        Uid::new(595,  0x05000000_u32), // 156
+        Uid::new(2249, 0x05000000_u32), // 189
+        Uid::new(426,  0x05000000_u32), // 200
+        Uid::new(514,  0x05000000_u32), // 223
+        Uid::new(1289, 0x05000000_u32), // 230
+        Uid::new(659,  0x05000000_u32), // 239
+        Uid::new(22,   0x05000000_u32), // 252
+        Uid::new(1315, 0x05000000_u32), // 277
+        Uid::new(494,  0x05000000_u32), // 5273
     ];
 
     // Benchmark 2: Build reconstruct chains for top 20 most frequent UIDs
