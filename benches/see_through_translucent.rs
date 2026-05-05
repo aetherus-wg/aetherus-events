@@ -99,7 +99,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // Benchmark 3: Build a new ledger with random addition of events to existing events
     c.bench_function("allocate", |b| {
         b.iter(|| {
-            let mut ledger = LedgerTree::new();
+            let ledger = LedgerTree::new();
             let start_node = ledger.root().insert(events[0]);
             let mut prev_node = start_node.clone();
             let mut weight: f64 = 1.0;
@@ -125,7 +125,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // which is the access pattern from Aetherus MCRT simulation
     c.bench_function("allocate_multithreaded", |b| {
         b.iter(|| {
-            let mut ledger = LedgerTree::new();
+            let ledger = LedgerTree::new();
             let num_threads = 8;
             let events_per_thread = 50_000;
             let mut handles = Vec::new();
@@ -164,7 +164,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     let ledger = {
-        let mut ledger = LedgerTree::new();
+        let ledger = LedgerTree::new();
         let start_node = ledger.root().insert(events[0]);
         let mut prev_node = start_node.clone();
         let mut weight: f64 = 1.0;

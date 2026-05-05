@@ -185,7 +185,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
 
 pub fn find_dangling_uids(ledger: &Ledger, bits_property: BitsProperty) -> Vec<Uid> {
     //let mut ledger_tree = LedgerTree::<SmallMap<u32, 8>, u32>::new();
-    let mut ledger_tree: LedgerTree<u32, SmallMap<u32, 8>> = ledger.into();
+    let ledger_tree: LedgerTree<u32, SmallMap<u32, 8>> = ledger.into();
     let ledger_root = ledger_tree.root();
     let mut found_uids: Vec<Uid> = Vec::new();
     for end_node in ledger_root.get_end_nodes() {

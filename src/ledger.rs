@@ -377,13 +377,12 @@ where
             next_light_id:   0,
             root:            LedgerNode::<T, M>::root(),
             node_map:        HashMap::new(),
+            // TODO: How to reliably detect mutation?
             dirty:           false,
             next_seq_no:     1,
         }
     }
-    pub fn root(&mut self) -> &Arc<LedgerNode<T, M>> {
-        // The tree might be mutated through the use of root node, hence, we mark it as dirty
-        self.dirty = true;
+    pub fn root(&self) -> &Arc<LedgerNode<T, M>> {
         &self.root
     }
     fn check_ids(&self) {
