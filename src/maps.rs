@@ -33,22 +33,27 @@ where
     items: SmallVec<[(K, Arc<LedgerNode<K, SmallMap<K, N>>>); N]>,
 }
 
-impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>> for SmallMap<K, N> {
+impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>>
+    for SmallMap<K, N>
+{
     type Item = Arc<LedgerNode<K, SmallMap<K, N>>>;
-    type Values<'a> = Map<slice::Iter<'a, (K, Self::Item)>, fn(&(K, Self::Item)) -> &Self::Item>
+    type Values<'a>
+        = Map<slice::Iter<'a, (K, Self::Item)>, fn(&(K, Self::Item)) -> &Self::Item>
     where
         K: 'a,
         Self::Item: 'a;
 
     fn new() -> Self {
-        Self { items: SmallVec::new() }
+        Self {
+            items: SmallVec::new(),
+        }
     }
 
     fn get(&self, query: &K) -> Option<&Self::Item> {
         self.items
-           .binary_search_by(|(k, _)| k.cmp(query))
-           .ok()
-           .map(|idx| &self.items[idx].1)
+            .binary_search_by(|(k, _)| k.cmp(query))
+            .ok()
+            .map(|idx| &self.items[idx].1)
     }
 
     fn values(&self) -> Self::Values<'_> {
@@ -60,7 +65,7 @@ impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>
             Ok(idx) => {
                 let old = std::mem::replace(&mut self.items[idx].1, v); // replace existing
                 Some(old)
-            },
+            }
             Err(idx) => {
                 self.items.insert(idx, (k, v)); // keep sorted
                 None
@@ -90,12 +95,15 @@ pub struct EventHashMap<K: RawEvent> {
 
 impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventHashMap<K>>>> for EventHashMap<K> {
     type Item = Arc<LedgerNode<K, EventHashMap<K>>>;
-    type Values<'a> = std::collections::hash_map::Values<'a, K, Self::Item>
+    type Values<'a>
+        = std::collections::hash_map::Values<'a, K, Self::Item>
     where
         K: 'a;
 
     fn new() -> Self {
-        Self { items: std::collections::HashMap::new() }
+        Self {
+            items: std::collections::HashMap::new(),
+        }
     }
     fn get(&self, query: &K) -> Option<&Self::Item> {
         self.items.get(query)
@@ -123,13 +131,16 @@ pub struct EventBTreeMap<K: RawEvent> {
 
 impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventBTreeMap<K>>>> for EventBTreeMap<K> {
     type Item = Arc<LedgerNode<K, EventBTreeMap<K>>>;
-    type Values<'a> = std::collections::btree_map::Values<'a, K, Self::Item>
+    type Values<'a>
+        = std::collections::btree_map::Values<'a, K, Self::Item>
     where
         K: 'a,
         Self::Item: 'a;
 
     fn new() -> Self {
-        Self { items: std::collections::BTreeMap::new() }
+        Self {
+            items: std::collections::BTreeMap::new(),
+        }
     }
     fn get(&self, query: &K) -> Option<&Self::Item> {
         self.items.get(query)

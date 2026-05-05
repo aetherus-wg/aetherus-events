@@ -65,7 +65,10 @@ impl FromStr for Uid {
 
 impl Uid {
     pub fn new(seq_id: u32, event: impl Into<u32>) -> Self {
-        Self { seq_id, event: event.into() }
+        Self {
+            seq_id,
+            event: event.into(),
+        }
     }
 
     pub fn from_event(seq_id: u32, event: &EventId) -> Self {

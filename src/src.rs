@@ -20,13 +20,13 @@ pub enum SrcId {
 impl std::fmt::Display for SrcId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SrcId::None        => write!(f, "None"),
-            SrcId::SrcId(id)   => write!(f, "SrcId({})", id),
-            SrcId::Mat(id)     => write!(f, "Mat({})", id),
-            SrcId::Surf(id)    => write!(f, "Surf({})", id),
-            SrcId::MatSurf(id) => write!(f, "MatSurf({})", id),
-            SrcId::Light(id)   => write!(f, "Light({})", id),
-            SrcId::Detector(id)     => write!(f, "Det({})", id),
+            SrcId::None         => write!(f, "None"),
+            SrcId::SrcId(id)    => write!(f, "SrcId({})", id),
+            SrcId::Mat(id)      => write!(f, "Mat({})", id),
+            SrcId::Surf(id)     => write!(f, "Surf({})", id),
+            SrcId::MatSurf(id)  => write!(f, "MatSurf({})", id),
+            SrcId::Light(id)    => write!(f, "Light({})", id),
+            SrcId::Detector(id) => write!(f, "Det({})", id),
         }
     }
 }
