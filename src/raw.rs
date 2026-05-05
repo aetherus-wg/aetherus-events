@@ -83,6 +83,7 @@ pub enum Pipeline {
     Detection = 5,
     Processing = 7,
     // Other codes are free to be used for custom pipeline stages
+    Root       = 0xf,
 }
 
 impl_u8_raw_field!(Pipeline);

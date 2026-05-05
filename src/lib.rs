@@ -52,6 +52,7 @@ pub mod events;
 pub mod ledger;
 pub mod src;
 pub mod uid;
+pub mod maps;
 
 pub mod filter;
 pub mod read;
@@ -77,11 +78,12 @@ pub trait Decode<T> {
 }
 
 pub trait RawEvent:
-    std::hash::Hash + Clone + Eq + std::fmt::Debug + serde::Serialize + for<'de> serde::Deserialize<'de>
+    std::hash::Hash + Clone + Ord + Eq + Into<u32> + From<u32> + std::fmt::Debug + serde::Serialize + for<'de> serde::Deserialize<'de>
 {
+    fn default() -> Self;
     fn pipeline(&self) -> Pipeline;
     fn decode(&self) -> EventId;
-    fn id(&self) -> u16;
+    fn src_id(&self) -> u16;
     fn raw(&self) -> u32;
 }
 
@@ -89,14 +91,17 @@ pub trait RawEvent:
 // Only reason this could be useful if there are other desirable way to encode the events,
 // but that's doubtful since the encoding scheme is taylored for u32
 impl RawEvent for u32 {
-    fn pipeline(&self) -> raw::Pipeline {
+    fn default() -> Self {
+        EventId{ event_type: EventType::Root, src_id: SrcId::None}.encode()
+    }
+    fn pipeline(&self) -> Pipeline {
         let pipe_code = ((self >> 24) & 0b1111) as u8;
         Pipeline::try_from(pipe_code).unwrap()
     }
     fn decode(&self) -> EventId {
         EventId::decode(*self)
     }
-    fn id(&self) -> u16 {
+    fn src_id(&self) -> u16 {
         (self & 0xFFFF) as u16
     }
     fn raw(&self) -> u32 {

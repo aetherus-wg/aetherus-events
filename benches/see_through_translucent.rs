@@ -6,7 +6,6 @@ use std::{
     env, fs,
     hint::black_box,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
     thread,
 };
 use tar::Archive;
@@ -56,6 +55,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     // Read ledger
     let ledger = read_ledger(&ledger_path).expect("Failed to read ledger file");
+    let ledger_tree: LedgerTree = ledger.into();
 
     // Top 20 most frequent UIDs in the ledger (these would be determined by analyzing the ledger beforehand)
     let uids = vec![
@@ -86,7 +86,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             let chains: Vec<_> = uids
                 .iter()
-                .map(|uid| ledger.get_chain(black_box(*uid)))
+                .map(|uid| ledger_tree.get_chain(black_box(uid)))
                 .collect();
             black_box(chains);
         })
@@ -99,23 +99,24 @@ fn criterion_benchmark(c: &mut Criterion) {
     // Benchmark 3: Build a new ledger with random addition of events to existing events
     c.bench_function("allocate", |b| {
         b.iter(|| {
-            let mut ledger = Ledger::new();
-            let start_uid = ledger.insert_start(events[0]);
-            let mut prev_uid = start_uid;
+            let mut ledger = LedgerTree::new();
+            let start_node = ledger.root().insert(events[0]);
+            let mut prev_node = start_node.clone();
             let mut weight: f64 = 1.0;
             let min_weight = 0.01;
 
             for _ in 0..100_000 {
                 let event = events[rng.random_range(1..events.len())];
-                prev_uid = ledger.insert(prev_uid, event);
+                prev_node = prev_node.insert(event);
 
                 weight *= rng.random::<f64>();
                 if weight < min_weight {
                     // Restart a new chain from the start UID
                     weight = 1.0;
-                    prev_uid = start_uid;
+                    prev_node = start_node.clone();
                 }
             }
+            ledger.resolve();
             let _ = black_box(ledger);
         })
     });
@@ -125,36 +126,30 @@ fn criterion_benchmark(c: &mut Criterion) {
     // which is the access pattern from Aetherus MCRT simulation
     c.bench_function("allocate_multithreaded", |b| {
         b.iter(|| {
-            let ledger = Arc::new(Mutex::new(Ledger::new()));
+            let mut ledger = LedgerTree::new();
             let num_threads = 8;
             let events_per_thread = 50_000;
             let mut handles = Vec::new();
-            let start_uid = {
-                let mut ledger_guard = ledger.lock().unwrap();
-                ledger_guard.insert_start(events[0])
-            };
+            let start_node = ledger.root().insert(events[0]);
 
             for thread_id in 0..num_threads {
-                let ledger_clone = Arc::clone(&ledger);
                 let events_clone = events.clone();
+                let start_node = start_node.clone();
                 let mut rng = rand::rngs::StdRng::from_seed([42u8 + thread_id; 32]);
 
                 let handle = thread::spawn(move || {
-                    let mut prev_uid = start_uid;
+                    let mut prev_node = start_node.clone();
                     let mut weight: f64 = 1.0;
                     let min_weight = 0.01;
 
                     for _ in 0..events_per_thread {
                         let event = events_clone[rng.random_range(1..events_clone.len())];
-                        prev_uid = {
-                            let mut ledger = ledger_clone.lock().unwrap();
-                            ledger.insert(prev_uid, event)
-                        };
+                        prev_node = prev_node.insert(event);
 
                         weight *= rng.random::<f64>();
                         if weight < min_weight {
                             weight = 1.0;
-                            prev_uid = start_uid;
+                            prev_node = start_node.clone();
                         }
                     }
                 });
@@ -165,9 +160,8 @@ fn criterion_benchmark(c: &mut Criterion) {
                 handle.join().unwrap();
             }
 
-            let ledger = Arc::try_unwrap(ledger)
-                .unwrap_or_else(|_| panic!("Error extracting final value of the Ledger"));
-            let _ = black_box(ledger.into_inner().unwrap());
+            ledger.resolve();
+            let _ = black_box(ledger);
         })
     });
 }

@@ -71,7 +71,9 @@
 //! ```ignore
 //! filter_perm![MCRT|Interface|*|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId]
 //! ```
-use crate::ledger::Ledger;
+
+use crate::ledger::{Ledger, LedgerTree};
+use crate::maps::SmallMap;
 use crate::uid::Uid;
 use std::collections::VecDeque;
 use std::fmt;
@@ -136,7 +138,7 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
     let mut seq_queue: VecDeque<SeqQueueEntry> = VecDeque::new();
     let mut found_uids: Vec<Uid> = Vec::new();
     // Initialize the queue with all events that have seq_no=0
-    for uid in ledger.get_start_events() {
+    for uid in ledger.start_events() {
         seq_queue.push_back(SeqQueueEntry {
             uid:               *uid,
             bits_property_seq: bits_property_seq.clone().into(),
@@ -182,8 +184,13 @@ pub fn find_forward_uid_seq(ledger: &Ledger, bits_property_seq: Vec<BitsProperty
 }
 
 pub fn find_dangling_uids(ledger: &Ledger, bits_property: BitsProperty) -> Vec<Uid> {
+    //let mut ledger_tree = LedgerTree::<SmallMap<u32, 8>, u32>::new();
+    let mut ledger_tree: LedgerTree<u32, SmallMap<u32, 8>> = ledger.into();
+    let ledger_root = ledger_tree.root();
     let mut found_uids: Vec<Uid> = Vec::new();
-    for uid in ledger.get_dangling_uids() {
+    for end_node in ledger_root.get_end_nodes() {
+        println!("Prune {:?}", end_node);
+        let uid = end_node.uid().unwrap();
         if bits_property.matches(uid.event) {
             found_uids.push(uid);
         }
@@ -482,31 +489,33 @@ mod tests {
 
     #[test]
     fn test_find_dangling_uids_no_dangling() {
-        let mut ledger = Ledger::new();
+        let mut ledger = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
-        let event = ledger.insert_start(EventId::new(EventType::Detection, SrcId::None));
-        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
-        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+        let node = ledger.root().insert(EventId::new(EventType::Detection, SrcId::None));
+        let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
+        let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
+        ledger.resolve();
 
-        let bits_property = BitsProperty::NoMatch(BitsMatch::new(0xFFFFFFFF, event.event));
+        let bits_property = BitsProperty::NoMatch(BitsMatch::new(0xFFFFFFFF, *node.event()));
 
-        let result = find_dangling_uids(&ledger, bits_property);
+        let result = ledger.find_dangling_uids(bits_property);
         assert_eq!(result.len(), 0, "Expected no dangling UIDs");
     }
 
     #[test]
     fn test_find_dangling_uids_dangling() {
-        let mut ledger = Ledger::new();
+        let mut ledger = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
-        let event = ledger.insert_start(EventId::new(EventType::Detection, SrcId::None));
-        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
-        let event = ledger.insert(event, EventId::new(EventType::Detection, SrcId::None));
+        let node = ledger.root().insert(EventId::new(EventType::Detection, SrcId::None));
+        let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
+        let node = node.insert(EventId::new(EventType::Detection, SrcId::None));
+        ledger.resolve();
 
-        let bits_property = BitsProperty::Match(BitsMatch::new(0xFFFFFFFF, event.event));
+        let bits_property = BitsProperty::Match(BitsMatch::new(0xFFFFFFFF, *node.event()));
 
-        let result = find_dangling_uids(&ledger, bits_property);
+        let result = ledger.find_dangling_uids(bits_property);
         assert_eq!(result.len(), 1, "Expected exactly one dangling UIDs");
     }
 }

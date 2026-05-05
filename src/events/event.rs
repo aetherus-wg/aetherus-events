@@ -15,6 +15,7 @@ pub enum EventType {
     MCRT(MCRT),
     Detection,
     Processing,
+    Root,
 }
 
 // EventId represents the EventType and *SrcId concatenated
@@ -27,19 +28,20 @@ pub struct EventId {
 impl std::fmt::Display for EventId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.event_type {
-            EventType::None => write!(f, "None"),
+            EventType::None        => write!(f, "None"),
             EventType::Emission(_) => write!(f, "Emission|{:4X}", *self.src_id),
-            EventType::MCRT(mcrt) => match mcrt {
+            EventType::MCRT(mcrt)  => match mcrt {
                 MCRT::Interface(interf) => match interf {
                     Interface::Reflection => write!(f, "Reflection|{:4X}", *self.src_id),
                     Interface::Refraction => write!(f, "Refraction|{:4X}", *self.src_id),
                     _ => write!(f, "Interface|{:4X}", *self.src_id),
                 },
                 MCRT::Reflector(_) => write!(f, "Reflector|{:4X}", *self.src_id),
-                MCRT::Material(_) => write!(f, "Material|{:4X}", *self.src_id),
+                MCRT::Material(_)  => write!(f, "Material|{:4X}", *self.src_id),
             },
-            EventType::Detection => write!(f, "Detection|{:4X}", *self.src_id),
-            EventType::Processing => write!(f, "Processing"),
+            EventType::Detection   => write!(f, "Detection|{:4X}", *self.src_id),
+            EventType::Processing  => write!(f, "Processing"),
+            EventType::Root        => write!(f, "Root / Non Event"),
         }
     }
 }
@@ -64,6 +66,15 @@ impl EventId {
         EventId {
             event_type: EventType::MCRT(mcrt_event),
             src_id:     matsurf_id,
+        }
+    }
+}
+
+impl Default for EventId {
+    fn default() -> Self {
+        EventId {
+            event_type: EventType::Root,
+            src_id: SrcId::None,
         }
     }
 }
@@ -96,7 +107,8 @@ impl Encode<u32> for EventId {
             EventType::MCRT(mcrt_event)   => raw::Pipeline::MCRT.encode() | mcrt_event.encode(),
             EventType::Emission(emission) => raw::Pipeline::Emission.encode() | emission.encode(),
             EventType::Detection          => raw::Pipeline::Detection.encode(),
-            _ => panic!("Cannot encode event type as MCRT event"),
+            EventType::Processing         => raw::Pipeline::Processing.encode(),
+            EventType::Root               => raw::Pipeline::Root.encode(),
         };
         event_type_code | (*self.src_id as u32)
     }
