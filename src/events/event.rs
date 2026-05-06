@@ -52,6 +52,12 @@ impl From<EventId> for u32 {
     }
 }
 
+impl From<&EventId> for u32 {
+    fn from(event: &EventId) -> u32 {
+        event.encode()
+    }
+}
+
 impl EventId {
     pub fn new(event_type: EventType, src_id: SrcId) -> Self {
         EventId { event_type, src_id }
