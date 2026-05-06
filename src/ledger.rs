@@ -46,7 +46,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Weak};
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 
 use crate::filter::BitsProperty;
 use crate::maps::EventMap;
