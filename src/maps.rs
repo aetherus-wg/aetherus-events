@@ -15,7 +15,11 @@ pub trait EventMap<K, V> {
     fn new() -> Self;
     fn get(&self, querry: &K) -> Option<&V>;
     fn values(&self) -> Self::Values<'_>;
-    fn insert(&mut self, k: K, v: V) -> Option<V>;
+
+    /// Don't override existent entry,
+    /// but return its values instead of the one wanted to insert
+    fn insert(&mut self, k: K, v: V) -> V;
+
     fn remove(&mut self, querry: &K) -> Option<V>;
     fn clear(&mut self);
     fn is_empty(&self) -> bool;
@@ -60,15 +64,14 @@ impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>
         self.items.iter().map(|(_k, v)| v)
     }
 
-    fn insert(&mut self, k: K, v: Self::Item) -> Option<Self::Item> {
+    fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
         match self.items.binary_search_by(|(key, _)| key.cmp(&k)) {
             Ok(idx) => {
-                let old = std::mem::replace(&mut self.items[idx].1, v); // replace existing
-                Some(old)
+                self.items[idx].1.clone()
             }
             Err(idx) => {
-                self.items.insert(idx, (k, v)); // keep sorted
-                None
+                self.items.insert(idx, (k, v.clone())); // keep sorted
+                v
             }
         }
     }
@@ -100,6 +103,7 @@ impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventHashMap<K>>>> for EventHash
     where
         K: 'a;
 
+    // TODO: Investigate if `with_capacity` improves performance for HashMap use vs SmallMap
     fn new() -> Self {
         Self {
             items: std::collections::HashMap::new(),
@@ -111,8 +115,8 @@ impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventHashMap<K>>>> for EventHash
     fn values(&self) -> Self::Values<'_> {
         self.items.values()
     }
-    fn insert(&mut self, k: K, v: Self::Item) -> Option<Self::Item> {
-        self.items.insert(k, v)
+    fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
+        self.items.entry(k).or_insert(v).clone()
     }
     fn remove(&mut self, query: &K) -> Option<Self::Item> {
         self.items.remove(query)
@@ -148,8 +152,8 @@ impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventBTreeMap<K>>>> for EventBTr
     fn values(&self) -> Self::Values<'_> {
         self.items.values()
     }
-    fn insert(&mut self, k: K, v: Self::Item) -> Option<Self::Item> {
-        self.items.insert(k, v)
+    fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
+        self.items.entry(k).or_insert(v).clone()
     }
     fn remove(&mut self, query: &K) -> Option<Self::Item> {
         self.items.remove(query)
