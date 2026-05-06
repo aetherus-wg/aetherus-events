@@ -3,7 +3,11 @@
 The ledger will be composed of two hash maps (key-value stores) that allows us to traverser the unique IDs (UID) of each event in each generation sequence.
 
 [![build](https://github.com/aetherus-wg/aetherus-events/actions/workflows/rust.yml/badge.svg)](https://github.com/aetherus-wg/aetherus-events/actions/workflows/rust.yml)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Apache%202.0-yellow?style=flat-square)](#license)
+[![User Guide](https://img.shields.io/badge/User%20Guide-mdBook-blue)](https://aetherus-wg.github.io/eldritch-trace/)
 ![GitHub Tag](https://img.shields.io/github/v/tag/aetherus-wg/aetherus-events)
+[![Bencher performance](https://img.shields.io/badge/Bencher-Performance-blue.svg)](https://bencher.dev/perf/aetherus-wg-aetherus-events?lower_value=false&upper_value=false&lower_boundary=false&upper_boundary=false&x_axis=version&branches=369de625-72f1-4b6a-aad8-4b04e9c1c911&testbeds=e4eeb74a-80d3-490d-b6f6-9017a74aa0dc&benchmarks=bc35acb4-b146-4dab-9a63-f71f90963a12%2C2c5c0a66-8e5c-4f7a-8e65-5fe8c3548d96%2C04948941-66f1-4080-8c1f-7c1d326ff0b1%2C4d1133b6-24a4-4397-8e3c-eff95aff822e&measures=c5adb7d2-0fa8-46b4-971a-301047835626&start_time=1770823647499&end_time=1778081247499&tab=plots&plots_search=4fe95fdb-97b4-4337-abf1-151e47a317f5&key=true&reports_per_page=4&branches_per_page=8&testbeds_per_page=8&benchmarks_per_page=8&plots_per_page=8&reports_page=1&branches_page=1&testbeds_page=1&benchmarks_page=1&plots_page=1&utm_medium=share&utm_source=bencher&utm_content=img&utm_campaign=perf%2Bimg&utm_term=aetherus-wg-aetherus-events)
+
 
 The photons collected are received in packets composed of:
 ```Rust
