@@ -118,11 +118,13 @@ where
 
     #[must_use]
     pub fn new_children(&self, event: T) -> Arc<Self> {
-        let new_node = Self::from_parent(&self.me.upgrade().unwrap(), event.clone());
         self.children
             .write()
             .unwrap()
-            .insert(event, new_node)
+            .insert_with(
+                event.clone(),
+                || Self::from_parent(&self.me.upgrade().unwrap(), event.clone())
+            )
     }
 
     pub fn children(&self) -> Vec<Arc<Self>> {
