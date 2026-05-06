@@ -20,6 +20,10 @@ pub trait EventMap<K, V> {
     /// but return its values instead of the one wanted to insert
     fn insert(&mut self, k: K, v: V) -> V;
 
+    fn insert_with<F>(&mut self, k: K, f: F) -> V
+    where
+        F: FnOnce() -> V;
+
     fn remove(&mut self, querry: &K) -> Option<V>;
     fn clear(&mut self);
     fn is_empty(&self) -> bool;
@@ -65,11 +69,19 @@ impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>
     }
 
     fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
+        self.insert_with(k, || v)
+    }
+
+    fn insert_with<F>(&mut self, k: K, f: F) -> Self::Item
+    where
+        F: FnOnce() -> Self::Item,
+    {
         match self.items.binary_search_by(|(key, _)| key.cmp(&k)) {
             Ok(idx) => {
                 self.items[idx].1.clone()
             }
             Err(idx) => {
+                let v = f();
                 self.items.insert(idx, (k, v.clone())); // keep sorted
                 v
             }
@@ -115,6 +127,12 @@ impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventHashMap<K>>>> for EventHash
     fn values(&self) -> Self::Values<'_> {
         self.items.values()
     }
+    fn insert_with<F>(&mut self, k: K, f: F) -> Self::Item
+    where
+        F: FnOnce() -> Self::Item,
+    {
+        self.items.entry(k).or_insert_with(f).clone()
+    }
     fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
         self.items.entry(k).or_insert(v).clone()
     }
@@ -151,6 +169,12 @@ impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventBTreeMap<K>>>> for EventBTr
     }
     fn values(&self) -> Self::Values<'_> {
         self.items.values()
+    }
+    fn insert_with<F>(&mut self, k: K, f: F) -> Self::Item
+    where
+        F: FnOnce() -> Self::Item,
+    {
+        self.items.entry(k).or_insert_with(f).clone()
     }
     fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
         self.items.entry(k).or_insert(v).clone()
