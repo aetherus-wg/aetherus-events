@@ -13,5 +13,6 @@ use crate::ledger::{
 use crate::maps::SmallMap;
 
 /// Type alias for the LedgerTree that was found to be optimal to use for MCRT simulations.
-pub type LedgerTree = GenericLedgerTree<u32, SmallMap<u32, MAP_SIZE>>;
-pub type LedgerNode = GenericLedgerNode<u32, SmallMap<u32, MAP_SIZE>>;
+type LedgerMap<T> = SmallMap<T, MAP_SIZE>;
+pub type LedgerTree = GenericLedgerTree<u32, LedgerMap<u32>>;
+pub type LedgerNode = GenericLedgerNode<u32, LedgerMap<u32>>;
