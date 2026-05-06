@@ -44,8 +44,6 @@ use serde_with::{DisplayFromStr, serde_as};
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock, Weak};
-use std::sync::atomic::AtomicU32;
-use std::sync::atomic::Ordering;
 
 use crate::filter::BitsProperty;
 use crate::maps::EventMap;
@@ -82,7 +80,6 @@ pub struct LedgerNode<T, M> {
     event:       T,
     next_seq_no: OnceCell<u32>,
     children:    RwLock<M>,
-    cnt:         AtomicU32,
 }
 
 // WARN: We decide to implement Send + Sync here for LedgerNode,
@@ -104,7 +101,6 @@ where
             event:       T::default(),
             parent:      None,
             children:    RwLock::new(M::new()),
-            cnt:         AtomicU32::new(0),
         })
     }
 
@@ -117,17 +113,16 @@ where
             event,
             parent: Some(Arc::downgrade(parent)),
             children: RwLock::new(M::new()),
-            cnt: AtomicU32::new(0),
         })
     }
 
+    #[must_use]
     pub fn new_children(&self, event: T) -> Arc<Self> {
         let new_node = Self::from_parent(&self.me.upgrade().unwrap(), event.clone());
         self.children
             .write()
             .unwrap()
-            .insert(event, new_node.clone());
-        new_node.clone()
+            .insert(event, new_node)
     }
 
     pub fn children(&self) -> Vec<Arc<Self>> {
@@ -161,25 +156,13 @@ where
             .map(|&seq_no| Uid::new(seq_no, self.event.clone().into()))
     }
 
+    #[must_use]
     pub fn insert(&self, event: impl Into<T>) -> Arc<Self> {
         let raw_event = event.into();
-        let mut cnt = self.cnt.load(Ordering::Relaxed);
-        loop {
-            if let Some(next) = self.children.read().unwrap().get(&raw_event) {
-                return next.clone();
-            } else {
-                let mut writer = self.children.write().unwrap();
-                match self.cnt.compare_exchange(cnt, cnt + 1, Ordering::Acquire, Ordering::Relaxed) {
-                    Ok(_) => {
-                        // Successfully reserved the next sequence number, now insert the new node
-                        let new_node =
-                            LedgerNode::from_parent(&self.me.upgrade().unwrap(), raw_event.clone());
-                        writer.insert(raw_event, new_node.clone());
-                        return new_node;
-                    }
-                    Err(e) => cnt = e,
-                }
-            }
+        if let Some(next) = self.children.read().unwrap().get(&raw_event) {
+            next.clone()
+        } else {
+            self.new_children(raw_event)
         }
     }
 
@@ -301,7 +284,6 @@ where
                 event: node.event.clone(),
                 next_seq_no: node.next_seq_no.clone(),
                 children: RwLock::new(M::new()),
-                cnt: AtomicU32::new(node.cnt.load(Ordering::Relaxed)),
             });
 
             let children = node.children.read().unwrap();
