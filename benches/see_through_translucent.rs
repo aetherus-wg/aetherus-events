@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use rand::{RngExt, SeedableRng};
 use std::{
@@ -97,70 +97,99 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut rng = rand::rngs::StdRng::from_seed([42u8; 32]);
 
     // Benchmark 3: Build a new ledger with random addition of events to existing events
+    let indices: Vec<usize> = (0..100_000)
+        .map(|_| rng.random_range(1..events.len()))
+        .collect();
+    let weights: Vec<f64> = (0..100_000)
+        .map(|_| rng.random::<f64>())
+        .collect();
     c.bench_function("allocate", |b| {
-        b.iter(|| {
-            let ledger = LedgerTree::new();
-            let start_node = ledger.root().insert(events[0]);
-            let mut prev_node = start_node.clone();
-            let mut weight: f64 = 1.0;
-            let min_weight = 0.01;
+        b.iter_batched(|| (indices.clone(), weights.clone()), |(indices, weights)| {
+                let ledger = LedgerTree::new();
+                let start_node = ledger.root().insert(events[0]);
+                let mut prev_node = start_node.clone();
+                let mut weight: f64 = 1.0;
+                let min_weight = 0.01;
 
-            for _ in 0..100_000 {
-                let event = events[rng.random_range(1..events.len())];
-                prev_node = prev_node.insert(event);
+                for idx in indices {
+                    let event = events[idx];
+                    prev_node = prev_node.insert(event);
 
-                weight *= rng.random::<f64>();
-                if weight < min_weight {
-                    // Restart a new chain from the start UID
-                    weight = 1.0;
-                    prev_node = start_node.clone();
+                    weight *= weights[idx];
+                    if weight < min_weight {
+                        // Restart a new chain from the start UID
+                        weight = 1.0;
+                        prev_node = start_node.clone();
+                    }
                 }
-            }
-            let _ = black_box(ledger);
-        })
+                let _ = black_box(ledger);
+            },
+            BatchSize::SmallInput
+        )
     });
 
     // Benchmark 4: Allocate ledger multi-threaded
     // This benchmark simulates multiple threads concurrently adding events to the ledger,
     // which is the access pattern from Aetherus MCRT simulation
+    let num_threads = 8;
+    let events_per_thread = 50_000;
+    let mut indices_per_thread = Vec::with_capacity(num_threads);
+    let mut weights_per_thread = Vec::with_capacity(num_threads);
+
+    for thread_id in 0..num_threads {
+        let mut rng = rand::rngs::StdRng::from_seed([42u8 + (thread_id as u8); 32]);
+        let indices: Vec<usize> = (0..events_per_thread)
+            .map(|_| rng.random_range(1..events.len()))
+            .collect();
+        let weights: Vec<f64> = (0..events_per_thread)
+            .map(|_| rng.random::<f64>())
+            .collect();
+        indices_per_thread.push(indices);
+        weights_per_thread.push(weights);
+    }
     c.bench_function("allocate_multithreaded", |b| {
-        b.iter(|| {
-            let ledger = LedgerTree::new();
-            let num_threads = 8;
-            let events_per_thread = 50_000;
-            let mut handles = Vec::new();
-            let start_node = ledger.root().insert(events[0]);
+        b.iter_batched(
+            || (indices_per_thread.clone(), weights_per_thread.clone()),
+            |(indices_per_thread, weights_per_thread)| {
+                let ledger = LedgerTree::new();
+                let mut handles = Vec::new();
+                let start_node = ledger.root().insert(events[0]);
 
-            for thread_id in 0..num_threads {
-                let events_clone = events.clone();
-                let start_node = start_node.clone();
-                let mut rng = rand::rngs::StdRng::from_seed([42u8 + thread_id; 32]);
+                for ((indices, weights), _thread_id) in indices_per_thread
+                    .into_iter()
+                    .zip(weights_per_thread.into_iter())
+                    .zip(0..num_threads)
+                {
+                    let events_clone = events.clone();
+                    let start_node = start_node.clone();
 
-                let handle = thread::spawn(move || {
-                    let mut prev_node = start_node.clone();
-                    let mut weight: f64 = 1.0;
-                    let min_weight = 0.01;
+                    let handle = thread::spawn(move || {
+                        let mut prev_node = start_node.clone();
+                        let mut weight: f64 = 1.0;
+                        let min_weight = 0.01;
 
-                    for _ in 0..events_per_thread {
-                        let event = events_clone[rng.random_range(1..events_clone.len())];
-                        prev_node = prev_node.insert(event);
+                        for (idx, w) in indices.into_iter().zip(weights.into_iter()) {
+                            let event = events_clone[idx];
+                            prev_node = prev_node.insert(event);
 
-                        weight *= rng.random::<f64>();
-                        if weight < min_weight {
-                            weight = 1.0;
-                            prev_node = start_node.clone();
+                            weight *= w;
+                            if weight < min_weight {
+                                weight = 1.0;
+                                prev_node = start_node.clone();
+                            }
                         }
-                    }
-                });
-                handles.push(handle);
-            }
+                    });
+                    handles.push(handle);
+                }
 
-            for handle in handles {
-                handle.join().unwrap();
-            }
+                for handle in handles {
+                    handle.join().unwrap();
+                }
 
-            let _ = black_box(ledger);
-        })
+                let _ = black_box(ledger);
+            },
+            BatchSize::SmallInput
+        )
     });
 
     let ledger = {
