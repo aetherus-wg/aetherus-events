@@ -43,7 +43,8 @@ use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::{Arc, Weak};
+use parking_lot::RwLock;
 
 use crate::filter::BitsProperty;
 use crate::maps::EventMap;
@@ -120,7 +121,6 @@ where
     pub fn new_children(&self, event: T) -> Arc<Self> {
         self.children
             .write()
-            .unwrap()
             .insert_with(
                 event.clone(),
                 || Self::from_parent(&self.me.upgrade().unwrap(), event.clone())
@@ -130,7 +130,6 @@ where
     pub fn children(&self) -> Vec<Arc<Self>> {
         self.children
             .read()
-            .unwrap()
             .values()
             .cloned()
             .collect()
@@ -161,7 +160,7 @@ where
     #[must_use]
     pub fn insert(&self, event: impl Into<T>) -> Arc<Self> {
         let raw_event = event.into();
-        if let Some(next) = self.children.read().unwrap().get(&raw_event) {
+        if let Some(next) = self.children.read().get(&raw_event) {
             next.clone()
         } else {
             self.new_children(raw_event)
@@ -192,16 +191,16 @@ where
         let mut event_type = self.event.clone();
 
         // 1. First clear all children this node references
-        self.children.write().unwrap().clear();
+        self.children.write().clear();
 
         // 2. Walk up the tree and remove any reference untill we meet a node that bifurcates
         let mut node = self.parent.as_ref().unwrap().clone();
         loop {
             let access_node = node.upgrade().unwrap();
-            access_node.children.write().unwrap().remove(&event_type);
+            access_node.children.write().remove(&event_type);
             event_type = access_node.event.clone();
 
-            if !access_node.children.read().unwrap().is_empty() {
+            if !access_node.children.read().is_empty() {
                 // Biffurcation point, stop pruning
                 break;
             } else if let Some(parent_ref) = &access_node.parent {
@@ -220,7 +219,7 @@ where
         stack_nodes.push(self.me.upgrade().unwrap());
 
         while let Some(node) = stack_nodes.pop() {
-            if node.children.read().unwrap().is_empty() {
+            if node.children.read().is_empty() {
                 // Check that this is not the root node
                 if node.next_seq_no.get() != Some(&0) {
                     end_nodes.push(node);
@@ -229,7 +228,6 @@ where
                 stack_nodes.extend(
                     node.children
                         .read()
-                        .unwrap()
                         .values()
                         .cloned()
                 );
@@ -288,14 +286,13 @@ where
                 children: RwLock::new(M::new()),
             });
 
-            let children = node.children.read().unwrap();
+            let children = node.children.read();
             for child in children.values() {
                 let child_event = child.event.clone();
                 let new_child = clone_node(child, Some(Arc::downgrade(&new_node)));
                 new_node
                     .children
                     .write()
-                    .unwrap()
                     .insert(child_event, new_child);
             }
 
@@ -309,13 +306,13 @@ where
         let mut resolve_stack = Vec::new();
         let node = self.root.clone();
 
-        for child in node.children.read().unwrap().values() {
+        for child in node.children.read().values() {
             resolve_stack.push(child.clone());
         }
         while let Some(node) = resolve_stack.pop() {
             if let Some(uid) = node.uid() {
                 node_map.insert(uid, Arc::downgrade(&node));
-                for child in node.children.read().unwrap().values() {
+                for child in node.children.read().values() {
                     resolve_stack.push(child.clone());
                 }
             }
@@ -570,7 +567,7 @@ where
         let mut resolve_stack: Vec<(Arc<LedgerNode<T, M>>, u32)> = Vec::new();
         let node = self.root.clone();
 
-        for child in node.children.read().unwrap().values() {
+        for child in node.children.read().values() {
             resolve_stack.push((child.clone(), *node.next_seq_no.get_or_init(|| 0)));
         }
 
@@ -590,7 +587,7 @@ where
             self.node_map
                 .insert(node.uid().unwrap(), Arc::downgrade(&node));
 
-            for child in node.children.read().unwrap().values() {
+            for child in node.children.read().values() {
                 resolve_stack.push((child.clone(), next_seq_no));
             }
         }
@@ -605,7 +602,7 @@ where
             .get(uid)
             .unwrap_or_else(|| panic!("UID {} not found in ledger", uid));
         let access_node = node.upgrade().unwrap();
-        let children_map = access_node.children.read().unwrap();
+        let children_map = access_node.children.read();
         children_map
             .values()
             .map(|node| node.uid().unwrap())
@@ -769,13 +766,13 @@ where
         // Traverse the resolved tree and reconstruct next / prev maps.
         // We do a DFS from the root.
         let mut stack = vec![];
-        for child in tree.root.children.read().unwrap().values() {
+        for child in tree.root.children.read().values() {
             ledger.insert_start(child.uid().unwrap());
             stack.push((child.uid().unwrap(), child.clone()));
         }
 
         while let Some((prev_uid, node)) = stack.pop() {
-            for child in node.children.read().unwrap().values() {
+            for child in node.children.read().values() {
                 ledger.insert(
                     prev_uid,
                     child.uid().unwrap(),
