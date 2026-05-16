@@ -1,7 +1,15 @@
 [package]
-name = "aetherus-events"
-version = "0.3.5"
+name = "events-ledger"
+version = "0.3.6"
+authors = ["Cristian Bourceanu <v.c.bourceanu@smd.ed.ac.uk>"]
 edition = "2024"
+description = "Events Ledger keeping track of all events for photon interactions or signal mutations/processes"
+repository = "https://github.com/aetherus-wg/events-ledger"
+readme = "README.md"
+license = "MIT"
+keywords = ["events", "ledger", "signal", "serializable"]
+categories = ["concurrency", "data-structures", "encoding", "science", "simulation"]
+exclude = [".github", "tools"]
 
 [dependencies]
 array-bytes = { version = "9.3.0", features = ["serde"] }

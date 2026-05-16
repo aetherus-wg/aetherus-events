@@ -20,7 +20,7 @@
 //! Use the `mcrt_event!` macro to construct events:
 //!
 //! ```rust
-//! use aetherus_events::mcrt_event;
+//! use events_ledger::mcrt_event;
 //!
 //! // Simple event
 //! let event = mcrt_event!(Interface, Reflection);

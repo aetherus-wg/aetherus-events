@@ -14,7 +14,7 @@
 //! ## Usage
 //!
 //! ```rust
-//! use aetherus_events::filter::{BitsMatch, BitsProperty};
+//! use events_ledger::filter::{BitsMatch, BitsProperty};
 //!
 //! // Match all Material events from Mat(ID=1)
 //! let matcher = BitsProperty::Match(BitsMatch::new(0x00FF0001, 0x03800001));
@@ -39,13 +39,13 @@
 //!
 //! 3. Filter for events that have N number of interactions described by
 //! ```ignore
-//! use aetherus_events::filter_mcrt_seq;
+//! use events_ledger::filter_mcrt_seq;
 //! filter_mcrt_seq!([MCRT|Interface|Refraction|SurfId, MCRT|Material|{Inelastic, Elastic}|*|*|MatId, ... ]);
 //! ```
 //!
 //! 4. Filter for permutations of events
 //! ```ignore
-//! use aetherus_events::filter_mcrt_seq;
+//! use events_ledger::filter_mcrt_seq;
 //! filter_mcrt_seq!(perm![ MCRT|Interface|*|SurfId,
 //!                    MCRT|Material|{Elastic, Inelastic}|*|*|MatId,
 //!                    ... ])
@@ -58,7 +58,7 @@
 //! Macro to create a filter specification using pipe-delimited syntax
 //! Single event filter:
 //! ```ignore
-//! use aetherus_events::filter_mcrt_seq;
+//! use events_ledger::filter_mcrt_seq;
 //! filter_mcrt_seq!(MCRT|Material|{Inelastic, Elastic}|*|*|MatId)
 //! ```
 //!

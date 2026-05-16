@@ -10,8 +10,8 @@ use std::{
 };
 use tar::Archive;
 
-use aetherus_events::prelude::*;
-use aetherus_events::read::read_ledger;
+use events_ledger::prelude::*;
+use events_ledger::read::read_ledger;
 
 fn get_benches_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".to_string());

@@ -12,9 +12,9 @@
 //! ## Usage
 //!
 //! ```rust
-//! use aetherus_events::prelude::*;
-//! use aetherus_events::mcrt_event;
-//! use aetherus_events::events::Emission;
+//! use events_ledger::prelude::*;
+//! use events_ledger::mcrt_event;
+//! use events_ledger::events::Emission;
 //!
 //! let mut ledger = LedgerTree::new();
 //!

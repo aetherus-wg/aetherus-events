@@ -24,8 +24,8 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use aetherus_events::prelude::*;
-//! use aetherus_events::{Encode, Decode};
+//! use events_ledger::prelude::*;
+//! use events_ledger::{Encode, Decode};
 //!
 //! // Create an event
 //! let event = EventId::new_mcrt(
