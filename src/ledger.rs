@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, BTreeMap};
 use std::sync::{Arc, Weak};
 use parking_lot::RwLock;
 
@@ -882,10 +882,10 @@ pub struct Ledger {
 
     // Use a nested map: (uid.seq_id -> (uid.event -> next_seq_id)) instead of uid -> next_seq_id
     // in order to retrive children of an event easily. This enables a tree search.
-    #[serde_as(as = "HashMap<_, HexInnerMap>")]
-    next:        HashMap<u32, HashMap<u32, u32>>,
-    #[serde_as(as = "HashMap<_, DisplayFromStr>")]
-    prev:        HashMap<u32, Uid>,
+    #[serde_as(as = "BTreeMap<_, HexInnerMap>")]
+    next:        BTreeMap<u32, BTreeMap<u32, u32>>,
+    #[serde_as(as = "BTreeMap<_, DisplayFromStr>")]
+    prev:        BTreeMap<u32, Uid>,
     next_seq_id: u32,
 }
 
@@ -899,8 +899,8 @@ impl Ledger {
             next_surf_id:    0,
             next_matsurf_id: u16::MAX,
             next_light_id:   0,
-            next:            HashMap::new(),
-            prev:            HashMap::new(),
+            next:            BTreeMap::new(),
+            prev:            BTreeMap::new(),
             next_seq_id:     0,
         }
     }
@@ -941,7 +941,7 @@ impl Ledger {
             .insert(uid.event, next_seq_id);
         self.prev.insert(next_seq_id, uid);
         // Prepare the next seq_id entry
-        self.next.insert(next_seq_id, HashMap::new());
+        self.next.insert(next_seq_id, BTreeMap::new());
     }
 
     pub fn get_next_seq_id(&self, uid: &Uid) -> Option<u32> {
@@ -968,12 +968,12 @@ impl Ledger {
 // ----------------------------------------------------
 // Helper methods and structs
 // ----------------------------------------------------
-// - Custom serializer/deserializer for HashMap<u32, u32> with hex keys
+// - Custom serializer/deserializer for BTreeMap<u32, u32> with hex keys
 
 pub struct HexInnerMap;
 
-impl SerializeAs<HashMap<u32, u32>> for HexInnerMap {
-    fn serialize_as<S>(value: &HashMap<u32, u32>, serializer: S) -> Result<S::Ok, S::Error>
+impl SerializeAs<BTreeMap<u32, u32>> for HexInnerMap {
+    fn serialize_as<S>(value: &BTreeMap<u32, u32>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -988,19 +988,19 @@ impl SerializeAs<HashMap<u32, u32>> for HexInnerMap {
     }
 }
 
-impl<'de> DeserializeAs<'de, HashMap<u32, u32>> for HexInnerMap {
-    fn deserialize_as<D>(deserializer: D) -> Result<HashMap<u32, u32>, D::Error>
+impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
+    fn deserialize_as<D>(deserializer: D) -> Result<BTreeMap<u32, u32>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         use serde::de::{Error as DeError, MapAccess, Visitor};
-        use std::collections::HashMap as StdHashMap;
+        use std::collections::BTreeMap as StdBTreeMap;
         use std::fmt;
 
         struct HexInnerVisitor;
 
         impl<'de> Visitor<'de> for HexInnerVisitor {
-            type Value = HashMap<u32, u32>;
+            type Value = BTreeMap<u32, u32>;
 
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.write_str("map with hex-encoded u32 keys")
@@ -1010,7 +1010,7 @@ impl<'de> DeserializeAs<'de, HashMap<u32, u32>> for HexInnerMap {
             where
                 A: MapAccess<'de>,
             {
-                let mut out = StdHashMap::new();
+                let mut out = StdBTreeMap::new();
                 while let Some((k, v)) = access.next_entry::<String, u32>()? {
                     let key = u32::from_str_radix(&k[2..10], 16)
                         .map_err(|e| A::Error::custom(format!("invalid hex key {k}: {e}")))?;
