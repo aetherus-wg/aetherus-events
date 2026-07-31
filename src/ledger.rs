@@ -193,7 +193,7 @@ where
         // 1. First clear all children this node references
         self.children.write().clear();
 
-        // 2. Walk up the tree and remove any reference untill we meet a node that bifurcates
+        // 2. Walk up the tree and remove any reference until we meet a node that bifurcates
         let mut node = self.parent.as_ref().unwrap().clone();
         loop {
             let access_node = node.upgrade().unwrap();
@@ -940,8 +940,6 @@ impl Ledger {
             .unwrap()
             .insert(uid.event, next_seq_id);
         self.prev.insert(next_seq_id, uid);
-        // Prepare the next seq_id entry
-        self.next.insert(next_seq_id, BTreeMap::new());
     }
 
     pub fn get_next_seq_id(&self, uid: &Uid) -> Option<u32> {
