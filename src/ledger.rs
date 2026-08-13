@@ -43,6 +43,7 @@ use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet, BTreeMap};
+use std::io::BufWriter;
 use std::sync::{Arc, Weak};
 use parking_lot::RwLock;
 
@@ -780,6 +781,10 @@ where
         }
         found_uids
     }
+
+    pub fn uids_count(&self) -> usize {
+        self.node_map.len()
+    }
 }
 
 impl<T, M> From<LedgerTree<T, M>> for Ledger
@@ -903,7 +908,8 @@ where
 {
     // Write the JSON string to a file
     let file = File::create(file_path).expect("Unable to create file");
-    serde_json::to_writer_pretty(file, ledger)
+    let writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(writer, ledger)
 }
 
 /// Event ledger for tracking photon event chains.
