@@ -235,6 +235,32 @@ where
         }
         leaf_nodes
     }
+
+    pub fn get_dangling_nodes(&self) -> Vec<Arc<Self>> {
+        let mut dangling_nodes = Vec::new();
+
+        let mut stack_nodes = Vec::new();
+        stack_nodes.push(self.me.upgrade().unwrap());
+
+        while let Some(node) = stack_nodes.pop() {
+            // A node is considered dangling if it a leaf node which is not referenced outside the tree.
+            // Parent references it once and the stack for traversal references it a second time,
+            // hence any counts larger than 2 imply that node is used somewhere outside the tree.
+            if node.children.read().is_empty() {
+                if Arc::strong_count(&node) <= 2 {
+                    dangling_nodes.push(node);
+                }
+            } else {
+                stack_nodes.extend(
+                    node.children
+                        .read()
+                        .values()
+                        .cloned()
+                );
+            }
+        }
+        dangling_nodes
+    }
 }
 
 pub struct LedgerTree<T, M>
@@ -730,7 +756,11 @@ where
         }
     }
 
-    pub fn get_dangling_nodes(&self, bits_property: BitsProperty) -> Vec<Arc<LedgerNode<T, M>>> {
+    pub fn get_dangling_nodes(&self) -> Vec<Arc<LedgerNode<T, M>>> {
+        self.root.get_dangling_nodes()
+    }
+
+    pub fn get_not_matching_nodes(&self, bits_property: BitsProperty) -> Vec<Arc<LedgerNode<T, M>>> {
         let mut found_nodes: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
         for end_node in self.root.get_leaf_nodes() {
             if bits_property.matches(end_node.event.clone().into()) {
@@ -740,7 +770,7 @@ where
         found_nodes
     }
 
-    pub fn get_dangling_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
+    pub fn get_not_matching_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
         let mut found_uids: Vec<Uid> = Vec::new();
         for end_node in self.root.get_leaf_nodes() {
             let uid = end_node.uid().unwrap();
@@ -1049,6 +1079,7 @@ mod tests {
 
     use super::*;
     use std::fs;
+    use std::hint::black_box;
     use tempfile::tempdir;
 
     #[test]
@@ -1273,7 +1304,55 @@ mod tests {
     }
 
     #[test]
-    fn test_leaf_nodes() {
+    fn test_node_dangling_nodes() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+        let detector_node =
+        {
+            // Populate ledger with non-dangling UIDs
+            let node_0     = ledger_tree.root()
+                .insert(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
+            let node_1     = node_0
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+
+            let node_21    = node_1
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            let node_22    = node_21
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            let _node_231  = node_22
+                .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+            let node_232   = node_22
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            let _node_2321 = node_232
+                .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+
+            let node_31    = node_1
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            #[allow(clippy::let_and_return)]
+            let node_32   = node_31
+                .insert(EventId::new(EventType::Detection, SrcId::Surf(1)));
+            node_32
+        };
+
+        let dangling_nodes = ledger_tree.root().get_dangling_nodes();
+        assert_eq!(dangling_nodes.len(), 2, "Expected dangling nodes to be pruned");
+
+        for node in dangling_nodes.iter() {
+            println!("Pruning node: {:?}", node);
+            ledger_tree.prune_node(node);
+        }
+
+        let dangling_nodes = ledger_tree.root().get_dangling_nodes();
+        assert_eq!(dangling_nodes.len(), 0, "Expected dangling nodes to be pruned");
+
+        let leaf_nodes = ledger_tree.root().get_leaf_nodes();
+        assert_eq!(leaf_nodes.len(), 1, "Expected only one node captured by the detector");
+
+        // Prevent early drop of detector record
+        black_box(detector_node);
+    }
+
+    #[test]
+    fn test_tree_leaf_nodes() {
         let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
@@ -1286,12 +1365,18 @@ mod tests {
         let result = ledger_tree.get_leaf_nodes();
         assert_eq!(
             result.len(), 1,
-            "Expected exactly one dangling node in a simple chain"
+            "Expected exactly one leaf node in a simple chain"
+        );
+
+        let root_node_result = ledger_tree.root().get_leaf_nodes();
+        assert_eq!(
+            root_node_result.len(), 1,
+            "Expected exactly one leaf node in a simple chain"
         );
     }
 
     #[test]
-    fn test_leaf_uids() {
+    fn test_tree_leaf_uids() {
         let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
@@ -1304,7 +1389,7 @@ mod tests {
         let result = ledger_tree.get_leaf_uids();
         assert_eq!(
             result.len(), 1,
-            "Expected exactly one dangling UID in a simple chain"
+            "Expected exactly one leaf node UID in a simple chain"
         );
     }
 
@@ -1390,7 +1475,7 @@ mod tests {
             .insert(EventId::new(EventType::Detection, SrcId::Surf(1)));
 
         let dangling_nodes = ledger_tree.get_leaf_nodes();
-        assert_eq!(dangling_nodes.len(), 3, "Expected dangling UIDs");
+        assert_eq!(dangling_nodes.len(), 3, "Expected leaf UIDs");
         let dangling_lost_nodes = dangling_nodes
             .into_iter()
             .filter(|uid| {
