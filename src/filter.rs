@@ -188,7 +188,7 @@ pub fn find_dangling_uids(ledger: &Ledger, bits_property: BitsProperty) -> Vec<U
     let ledger_tree: LedgerTree<u32, SmallMap<u32, 8>> = ledger.into();
     let ledger_root = ledger_tree.root();
     let mut found_uids: Vec<Uid> = Vec::new();
-    for end_node in ledger_root.get_end_nodes() {
+    for end_node in ledger_root.get_leaf_nodes() {
         println!("Prune {:?}", end_node);
         let uid = end_node.uid().unwrap();
         if bits_property.matches(uid.event) {
@@ -501,7 +501,7 @@ mod tests {
 
         let bits_property = BitsProperty::NoMatch(BitsMatch::new(0xFFFFFFFF, *node.event()));
 
-        let result = ledger.find_dangling_uids(bits_property);
+        let result = ledger.get_dangling_uids(bits_property);
         assert_eq!(result.len(), 0, "Expected no dangling UIDs");
     }
 
@@ -519,7 +519,7 @@ mod tests {
 
         let bits_property = BitsProperty::Match(BitsMatch::new(0xFFFFFFFF, *node.event()));
 
-        let result = ledger.find_dangling_uids(bits_property);
+        let result = ledger.get_dangling_uids(bits_property);
         assert_eq!(result.len(), 1, "Expected exactly one dangling UIDs");
     }
 }

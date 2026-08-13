@@ -212,8 +212,8 @@ where
         }
     }
 
-    pub fn get_end_nodes(&self) -> Vec<Arc<Self>> {
-        let mut end_nodes = Vec::new();
+    pub fn get_leaf_nodes(&self) -> Vec<Arc<Self>> {
+        let mut leaf_nodes = Vec::new();
 
         let mut stack_nodes = Vec::new();
         stack_nodes.push(self.me.upgrade().unwrap());
@@ -222,7 +222,7 @@ where
             if node.children.read().is_empty() {
                 // Check that this is not the root node
                 if node.next_seq_no.get() != Some(&0) {
-                    end_nodes.push(node);
+                    leaf_nodes.push(node);
                 }
             } else {
                 stack_nodes.extend(
@@ -233,7 +233,7 @@ where
                 );
             }
         }
-        end_nodes
+        leaf_nodes
     }
 }
 
@@ -710,10 +710,15 @@ where
         }
     }
 
-    pub fn get_dangling_uids(&self) -> Vec<Uid> {
+    pub fn get_leaf_uids(&self) -> Vec<Uid> {
         self.check_dirty();
-        let end_nodes = self.root.get_end_nodes();
+        let end_nodes = self.root.get_leaf_nodes();
         end_nodes.iter().map(|node| node.uid().unwrap()).collect()
+    }
+
+    pub fn get_leaf_nodes(&self) -> Vec<Arc<LedgerNode<T,M>>> {
+        self.check_dirty();
+        self.root.get_leaf_nodes()
     }
 
     pub fn get_node(&self, uid: &Uid) -> Option<Arc<LedgerNode<T, M>>> {
@@ -725,9 +730,19 @@ where
         }
     }
 
-    pub fn find_dangling_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
+    pub fn get_dangling_nodes(&self, bits_property: BitsProperty) -> Vec<Arc<LedgerNode<T, M>>> {
+        let mut found_nodes: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
+        for end_node in self.root.get_leaf_nodes() {
+            if bits_property.matches(end_node.event.clone().into()) {
+                found_nodes.push(end_node);
+            }
+        }
+        found_nodes
+    }
+
+    pub fn get_dangling_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
         let mut found_uids: Vec<Uid> = Vec::new();
-        for end_node in self.root.get_end_nodes() {
+        for end_node in self.root.get_leaf_nodes() {
             let uid = end_node.uid().unwrap();
             if bits_property.matches(uid.event) {
                 found_uids.push(uid);
@@ -1258,7 +1273,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_dangling_uids() {
+    fn test_leaf_nodes() {
         let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
@@ -1268,7 +1283,25 @@ mod tests {
 
         ledger_tree.resolve();
 
-        let result = ledger_tree.get_dangling_uids();
+        let result = ledger_tree.get_leaf_nodes();
+        assert_eq!(
+            result.len(), 1,
+            "Expected exactly one dangling node in a simple chain"
+        );
+    }
+
+    #[test]
+    fn test_leaf_uids() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+
+        // Populate ledger with non-dangling UIDs
+        let node1 = ledger_tree.root().insert(EventId::new(EventType::Detection, SrcId::None));
+        let node2 = node1.insert(EventId::new(EventType::Detection, SrcId::None));
+        let _node3 = node2.insert(EventId::new(EventType::Detection, SrcId::None));
+
+        ledger_tree.resolve();
+
+        let result = ledger_tree.get_leaf_uids();
         assert_eq!(
             result.len(), 1,
             "Expected exactly one dangling UID in a simple chain"
@@ -1276,7 +1309,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prune_until_bifurcation() {
+    fn test_prune_until_bifurcation_uids() {
         let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
 
         // Populate ledger with non-dangling UIDs
@@ -1303,7 +1336,7 @@ mod tests {
 
         ledger_tree.resolve();
 
-        let dangling_uids = ledger_tree.get_dangling_uids();
+        let dangling_uids = ledger_tree.get_leaf_uids();
         assert_eq!(dangling_uids.len(), 3, "Expected dangling UIDs");
         let dangling_lost_uids = dangling_uids
             .into_iter()
@@ -1327,6 +1360,55 @@ mod tests {
 
         for uid in dangling_lost_uids.iter() {
             assert!(ledger_tree.get_node(uid).is_none());
+        }
+    }
+
+    #[test]
+    fn test_prune_until_bifurcation_nodes() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+
+        // Populate ledger with non-dangling UIDs
+        let node_0     = ledger_tree.root()
+            .insert(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
+        let node_1     = node_0
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+
+        let node_21    = node_1
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let node_22    = node_21
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let _node_231  = node_22
+            .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+        let node_232   = node_22
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let _node_2321 = node_232
+            .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
+
+        let node_31    = node_1
+            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+        let _node_32   = node_31
+            .insert(EventId::new(EventType::Detection, SrcId::Surf(1)));
+
+        let dangling_nodes = ledger_tree.get_leaf_nodes();
+        assert_eq!(dangling_nodes.len(), 3, "Expected dangling UIDs");
+        let dangling_lost_nodes = dangling_nodes
+            .into_iter()
+            .filter(|uid| {
+                BitsProperty::NoMatch(pattern!(Detection, SrcId::Surf(1))).matches(uid.event)
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            dangling_lost_nodes.len(),
+            2,
+            "Expected dangling UID to be pruned"
+        );
+
+        //println!("{:?}", ledger);
+
+        for node in dangling_lost_nodes.iter() {
+            println!("Pruning node: {:?}", node);
+            ledger_tree.prune_node(node);
         }
     }
 }
