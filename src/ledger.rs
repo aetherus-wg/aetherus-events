@@ -255,6 +255,16 @@ where
         }
         dangling_nodes
     }
+
+    pub fn count_events(&self) -> HashMap<T, usize> {
+        let mut counts: HashMap<T, usize> = HashMap::new();
+        let mut node = self.me.upgrade().unwrap();
+        while let Some(parent) = &node.parent {
+            counts.entry(node.event.clone()).and_modify(|c| *c += 1).or_insert(1);
+            node = parent.upgrade().unwrap();
+        }
+        counts
+    }
 }
 
 pub struct LedgerTree<T, M>
@@ -778,6 +788,20 @@ where
     pub fn uids_count(&self) -> usize {
         self.node_map.len()
     }
+
+    pub fn count_events(&self) -> HashMap<T, HashMap<Uid, usize>> {
+        let mut counts = HashMap::new();
+        let leaf_nodes = self.root.get_leaf_nodes();
+        for node in leaf_nodes.iter() {
+            let node_counts = node.count_events();
+            for (event, count) in node_counts {
+                let uid = node.uid().unwrap();
+                let entry = counts.entry(event).or_insert_with(HashMap::new);
+                entry.insert(uid, count);
+            }
+        }
+        counts
+    }
 }
 
 impl<T, M> From<LedgerTree<T, M>> for Ledger
@@ -1069,6 +1093,7 @@ impl<'de> DeserializeAs<'de, BTreeMap<u32, u32>> for HexInnerMap {
 #[cfg(test)]
 mod tests {
     use crate::RawEvent;
+    use crate::Encode;
     use crate::events::Emission;
     use crate::events::EventType;
     use crate::filter::BitsProperty;
@@ -1494,5 +1519,52 @@ mod tests {
             println!("Pruning node: {:?}", node);
             ledger_tree.prune_node(node);
         }
+    }
+
+    #[test]
+    fn test_node_count_events() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+
+        // Populate ledger with non-dangling UIDs
+        {
+            let node_0  = ledger_tree.root()
+                .insert(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
+            let node_1     = node_0
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            let node_2    = node_1
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            let node_3    = node_2
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
+            let node_4   = node_3
+                .insert(EventId::new_mcrt(mcrt_event!(Material, Inelastic, Raman, Unknown), SrcId::Mat(1)));
+            let node_5   = node_4
+                .insert(EventId::new_mcrt(mcrt_event!(Reflector, Diffuse), SrcId::Surf(0)));
+            let _node_6 = node_5.insert(EventId::new(EventType::Detection, SrcId::None));
+        }
+
+        ledger_tree.resolve();
+
+        let result = ledger_tree.get_leaf_nodes();
+        assert_eq!(
+            result.len(), 1,
+            "Expected exactly one leaf node in a simple chain"
+        );
+
+        let event = EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0));
+        let event_counts = result[0].count_events();
+        assert_eq!(
+            event_counts.get(&event.encode()).cloned().unwrap(),
+            3,
+            "Expected 3 occurrences of the event in the chain"
+        );
+
+        let tree_event_counts = ledger_tree.count_events();
+        let scatter_event_counts: Vec<usize> = tree_event_counts.get(&event.encode()).unwrap().clone().into_values().collect();
+        assert_eq!(scatter_event_counts.len(), 1); 
+        assert_eq!(
+            scatter_event_counts[0],
+            3,
+            "Expected 3 occurrences of the event in the chain"
+        );
     }
 }
