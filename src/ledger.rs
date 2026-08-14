@@ -41,10 +41,9 @@ use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
-use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet, BTreeMap};
 use std::io::BufWriter;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Weak, OnceLock};
 use parking_lot::RwLock;
 
 use crate::filter::BitsProperty;
@@ -78,17 +77,11 @@ pub struct LedgerNode<T, M> {
     me:          Weak<LedgerNode<T, M>>,
     parent:      Option<Weak<LedgerNode<T, M>>>,
     // Uid = {seq_no, event}
-    seq_no:      OnceCell<u32>,
+    seq_no:      OnceLock<u32>,
     event:       T,
-    next_seq_no: OnceCell<u32>,
+    next_seq_no: OnceLock<u32>,
     children:    RwLock<M>,
 }
-
-// WARN: We decide to implement Send + Sync here for LedgerNode,
-// assuming that writting of `seq_no` and `next_seq_no` will never happen i
-// during multi-threaded execution
-unsafe impl<T, M> Send for LedgerNode<T, M> {}
-unsafe impl<T, M> Sync for LedgerNode<T, M> {}
 
 impl<T, M> LedgerNode<T, M>
 where
@@ -98,7 +91,7 @@ where
     pub fn root() -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me:          me.clone(),
-            seq_no:      OnceCell::new(),
+            seq_no:      OnceLock::new(),
             next_seq_no: 0.into(),
             event:       T::default(),
             parent:      None,
@@ -111,7 +104,7 @@ where
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             seq_no,
-            next_seq_no: OnceCell::new(),
+            next_seq_no: OnceLock::new(),
             event,
             parent: Some(Arc::downgrade(parent)),
             children: RwLock::new(M::new()),
