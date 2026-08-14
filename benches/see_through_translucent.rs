@@ -10,7 +10,7 @@ use std::{
 };
 use tar::Archive;
 
-use events_ledger::prelude::*;
+use events_ledger::{ledger::write_ledger_to_json, prelude::*};
 use events_ledger::read::read_ledger;
 
 fn get_benches_dir() -> PathBuf {
@@ -163,7 +163,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         })
     });
 
-    let ledger = {
+    let mut ledger_tree = {
         let ledger = LedgerTree::new();
         let start_node = ledger.root().insert(events[0]);
         let mut prev_node = start_node.clone();
@@ -185,13 +185,23 @@ fn criterion_benchmark(c: &mut Criterion) {
     };
 
     c.bench_function("resolve", |b| {
-        b.iter_batched(|| ledger.clone(), // not timed
+        b.iter_batched(|| ledger_tree.clone(), // not timed
             |mut ledger| {
                 ledger.resolve(); // timed
                 black_box(ledger);
             },
             criterion::BatchSize::SmallInput,
         );
+    });
+
+
+    ledger_tree.resolve();
+    let ledger_flat: Ledger = ledger_tree.into();
+    c.bench_function("serialize", |b| {
+        b.iter(|| {
+            let file_tmp_filepath = benches_dir.join("data").join("simulation_ledger_tmp.json");
+            write_ledger_to_json(&ledger_flat, file_tmp_filepath).expect("Failed to write ledger to JSON");
+        })
     });
 }
 
