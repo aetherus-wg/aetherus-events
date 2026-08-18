@@ -386,7 +386,7 @@ where
             resolve_stack.push(child.clone());
         }
         while let Some(node) = resolve_stack.pop() {
-            if let Some(_) = node.seq_no.get() {
+            if node.seq_no.get().is_some() {
                 for child in node.children.read().values() {
                     resolve_stack.push(child.clone());
                 }

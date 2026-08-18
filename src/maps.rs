@@ -1,4 +1,4 @@
-use std::{iter::Map, slice, sync::Arc};
+use std::{slice, sync::Arc};
 
 use smallvec::SmallVec;
 
