@@ -30,7 +30,7 @@ pub trait EventMap<K, V> {
 }
 
 #[derive(Debug)]
-pub struct SmallMap<K, const N: usize>
+pub struct SmallMap<'a, K, const N: usize>
 where
     K: RawEvent,
 {
@@ -38,18 +38,18 @@ where
     // This is a simple implementation of a map that allows for efficient lookups and insertions
     // when the size of the map is quite small
     #[allow(clippy::type_complexity)]
-    items: SmallVec<[(K, Arc<LedgerNode<K, SmallMap<K, N>>>); N]>,
+    items: SmallVec<[(K, Arc<LedgerNode<'a, K, SmallMap<'a, K, N>>>); N]>,
 }
 
-impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>>
-    for SmallMap<K, N>
+impl<'a, K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<'a, K, SmallMap<'a, K, N>>>>
+    for SmallMap<'a, K, N>
 {
-    type Item = Arc<LedgerNode<K, SmallMap<K, N>>>;
-    type Values<'a>
-        = Map<slice::Iter<'a, (K, Self::Item)>, fn(&(K, Self::Item)) -> &Self::Item>
+    type Item = Arc<LedgerNode<'a, K, SmallMap<'a, K, N>>>;
+    type Values<'e>
+        = Map<slice::Iter<'e, (K, Self::Item)>, fn(&(K, Self::Item)) -> &Self::Item>
     where
-        K: 'a,
-        Self::Item: 'a;
+        K: 'e,
+        Self::Item: 'e;
 
     fn new() -> Self {
         Self {
@@ -104,16 +104,16 @@ impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>
     }
 }
 
-pub struct EventHashMap<K: RawEvent> {
-    items: std::collections::HashMap<K, Arc<LedgerNode<K, EventHashMap<K>>>>,
+pub struct EventHashMap<'a, K: RawEvent> {
+    items: std::collections::HashMap<K, Arc<LedgerNode<'a, K, EventHashMap<'a, K>>>>,
 }
 
-impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventHashMap<K>>>> for EventHashMap<K> {
-    type Item = Arc<LedgerNode<K, EventHashMap<K>>>;
-    type Values<'a>
-        = std::collections::hash_map::Values<'a, K, Self::Item>
+impl<'a, K: RawEvent> EventMap<K, Arc<LedgerNode<'a, K, EventHashMap<'a, K>>>> for EventHashMap<'a, K> {
+    type Item = Arc<LedgerNode<'a, K, EventHashMap<'a, K>>>;
+    type Values<'e>
+        = std::collections::hash_map::Values<'e, K, Self::Item>
     where
-        K: 'a;
+        K: 'e;
 
     // TODO: Investigate if `with_capacity` improves performance for HashMap use vs SmallMap
     fn new() -> Self {
@@ -147,17 +147,17 @@ impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventHashMap<K>>>> for EventHash
     }
 }
 
-pub struct EventBTreeMap<K: RawEvent> {
-    items: std::collections::BTreeMap<K, Arc<LedgerNode<K, EventBTreeMap<K>>>>,
+pub struct EventBTreeMap<'a, K: RawEvent> {
+    items: std::collections::BTreeMap<K, Arc<LedgerNode<'a, K, EventBTreeMap<'a, K>>>>,
 }
 
-impl<K: RawEvent> EventMap<K, Arc<LedgerNode<K, EventBTreeMap<K>>>> for EventBTreeMap<K> {
-    type Item = Arc<LedgerNode<K, EventBTreeMap<K>>>;
-    type Values<'a>
-        = std::collections::btree_map::Values<'a, K, Self::Item>
+impl<'a, K: RawEvent> EventMap<K, Arc<LedgerNode<'a, K, EventBTreeMap<'a, K>>>> for EventBTreeMap<'a, K> {
+    type Item = Arc<LedgerNode<'a, K, EventBTreeMap<'a, K>>>;
+    type Values<'e>
+        = std::collections::btree_map::Values<'e, K, Self::Item>
     where
-        K: 'a,
-        Self::Item: 'a;
+        K: 'e,
+        Self::Item: 'e;
 
     fn new() -> Self {
         Self {

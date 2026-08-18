@@ -43,6 +43,7 @@ use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::collections::{HashMap, HashSet, BTreeMap};
 use std::io::BufWriter;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak, OnceLock};
 use parking_lot::RwLock;
 
@@ -73,29 +74,31 @@ pub enum SrcName {
 }
 
 #[derive(Debug)]
-pub struct LedgerNode<T, M> {
-    me:          Weak<LedgerNode<T, M>>,
-    parent:      Option<Weak<LedgerNode<T, M>>>,
+pub struct LedgerNode<'a, T, M> {
+    me:                Weak<LedgerNode<'a, T, M>>,
+    parent:            Option<Weak<LedgerNode<'a, T, M>>>,
     // Uid = {seq_no, event}
-    seq_no:      OnceLock<u32>,
-    event:       T,
-    next_seq_no: OnceLock<u32>,
-    children:    RwLock<M>,
+    seq_no:            OnceLock<u32>,
+    event:             T,
+    next_seq_no:       OnceLock<u32>,
+    next_avail_seq_no: &'a AtomicU32,
+    children:          RwLock<M>,
 }
 
-impl<T, M> LedgerNode<T, M>
+impl<'a, T, M> LedgerNode<'a, T, M>
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
-    pub fn root() -> Arc<Self> {
+    pub fn root(next_avail_seq_no: &'a AtomicU32) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
-            me:          me.clone(),
-            seq_no:      OnceLock::new(),
-            next_seq_no: 0.into(),
-            event:       T::default(),
-            parent:      None,
-            children:    RwLock::new(M::new()),
+            me:                me.clone(),
+            seq_no:            OnceLock::new(),
+            next_seq_no:       OnceLock::new(),
+            next_avail_seq_no,
+            event:             T::default(),
+            parent:            None,
+            children:          RwLock::new(M::new()),
         })
     }
 
@@ -105,6 +108,7 @@ where
             me: me.clone(),
             seq_no,
             next_seq_no: OnceLock::new(),
+            next_avail_seq_no: parent.next_avail_seq_no,
             event,
             parent: Some(Arc::downgrade(parent)),
             children: RwLock::new(M::new()),
@@ -267,9 +271,9 @@ where
     }
 }
 
-pub struct LedgerTree<T, M>
+pub struct LedgerTree<'a, T, M>
 where
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
     T: RawEvent,
 {
     grps:    HashMap<String, SrcId>,       // Key: Group name
@@ -280,12 +284,12 @@ where
     next_matsurf_id: u16,
     next_light_id:   u16,
 
-    next_seq_no: u32,
+    next_seq_no:     AtomicU32,
 
     // This should be an EventType::Root
-    root:     Arc<LedgerNode<T, M>>,
+    root:     Arc<LedgerNode<'a, T, M>>,
     // WARN: This should hold a weak pointer in order to allow cleanup when tree is pruned
-    node_map: HashMap<Uid, Weak<LedgerNode<T, M>>>,
+    node_map: HashMap<Uid, Weak<LedgerNode<'a, T, M>>>,
 
     // Attempts to keep track of when new elements have been added to the Ledger
     dirty: bool,
@@ -293,24 +297,25 @@ where
 
 // Implement a deep copy of the tree and avoid referencing to nodes
 // from the original tree
-impl<T, M> Clone for LedgerTree<T, M>
+impl<'a, T, M> Clone for LedgerTree<'a, T, M>
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
     fn clone(&self) -> Self {
-        fn clone_node<T, M>(
-            node: &Arc<LedgerNode<T, M>>,
-            parent: Option<Weak<LedgerNode<T, M>>>,
-        ) -> Arc<LedgerNode<T, M>>
+        fn clone_node<'a, T, M>(
+            node: &Arc<LedgerNode<'a, T, M>>,
+            parent: Option<Weak<LedgerNode<'a, T, M>>>,
+        ) -> Arc<LedgerNode<'a, T, M>>
         where
             T: RawEvent,
-            M: EventMap<T, Arc<LedgerNode<T, M>>>,
+            M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
         {
             let new_node = Arc::new_cyclic(|me| LedgerNode {
                 me: me.clone(),
                 parent,
                 seq_no: node.seq_no.clone(),
+                next_avail_seq_no: node.next_avail_seq_no,
                 event: node.event.clone(),
                 next_seq_no: node.next_seq_no.clone(),
                 children: RwLock::new(M::new()),
@@ -358,27 +363,28 @@ where
             root,
             node_map,
             dirty: self.dirty,
-            next_seq_no: self.next_seq_no,
+            next_seq_no: AtomicU32::new(self.next_seq_no.load(Ordering::SeqCst)),
         }
     }
 }
 
-impl<T, M> Default for LedgerTree<T, M>
+impl<'a, T, M> Default for LedgerTree<'a, T, M>
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T, M> LedgerTree<T, M>
+impl<'a, T, M> LedgerTree<'a, T, M>
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
     pub fn new() -> Self {
+        let next_seq_no = AtomicU32::new(0);
         Self {
             grps:            HashMap::new(),
             src_map:         HashMap::new(),
@@ -386,11 +392,11 @@ where
             next_surf_id:    0,
             next_matsurf_id: u16::MAX,
             next_light_id:   0,
-            root:            LedgerNode::<T, M>::root(),
+            root:            LedgerNode::<T, M>::root(&next_seq_no),
             node_map:        HashMap::new(),
             // TODO: How to reliably detect mutation?
             dirty:           false,
-            next_seq_no:     1,
+            next_seq_no,
         }
     }
     pub fn root(&self) -> &Arc<LedgerNode<T, M>> {
@@ -719,7 +725,7 @@ where
         dot
     }
 
-    pub fn prune_node(&mut self, node: &Arc<LedgerNode<T, M>>) {
+    pub fn prune_node(&mut self, node: &Arc<LedgerNode<'a, T, M>>) {
         self.check_dirty();
         if let Some(uid) = node.uid() {
             self.node_map.remove(&uid);
@@ -746,7 +752,7 @@ where
         end_nodes.iter().map(|node| node.uid().unwrap()).collect()
     }
 
-    pub fn get_leaf_nodes(&self) -> Vec<Arc<LedgerNode<T,M>>> {
+    pub fn get_leaf_nodes(&self) -> Vec<Arc<LedgerNode<T, M>>> {
         self.check_dirty();
         self.root.get_leaf_nodes()
     }
@@ -764,7 +770,10 @@ where
         self.root.get_dangling_nodes()
     }
 
-    pub fn get_not_matching_nodes(&self, bits_property: BitsProperty) -> Vec<Arc<LedgerNode<T, M>>> {
+    pub fn get_not_matching_nodes(
+        &self,
+        bits_property: BitsProperty,
+    ) -> Vec<Arc<LedgerNode<T, M>>> {
         let mut found_nodes: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
         for end_node in self.root.get_leaf_nodes() {
             if bits_property.matches(end_node.event.clone().into()) {
@@ -804,22 +813,22 @@ where
     }
 }
 
-impl<T, M> From<LedgerTree<T, M>> for Ledger
+impl<'a, T, M> From<LedgerTree<'a, T, M>> for Ledger
 where
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
     T: RawEvent,
 {
-    fn from(tree: LedgerTree<T, M>) -> Self {
+    fn from(tree: LedgerTree<'a, T, M>) -> Self {
         Self::from(&tree)
     }
 }
 
-impl<T, M> From<&LedgerTree<T, M>> for Ledger
+impl<'a, T, M> From<&LedgerTree<'a, T, M>> for Ledger
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
-    fn from(tree: &LedgerTree<T, M>) -> Self {
+    fn from(tree: &LedgerTree<'a, T, M>) -> Self {
         let mut ledger = Ledger::new();
 
         ledger.grps            = tree.grps.clone();
@@ -853,20 +862,20 @@ where
     }
 }
 
-impl<T, M> From<Ledger> for LedgerTree<T, M>
+impl<'a, T, M> From<Ledger> for LedgerTree<'a, T, M>
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
     fn from(value: Ledger) -> Self {
         Self::from(&value)
     }
 }
 
-impl<T, M> From<&Ledger> for LedgerTree<T, M>
+impl<'a, T, M> From<&Ledger> for LedgerTree<'a, T, M>
 where
     T: RawEvent,
-    M: EventMap<T, Arc<LedgerNode<T, M>>>,
+    M: EventMap<T, Arc<LedgerNode<'a, T, M>>>,
 {
     fn from(value: &Ledger) -> Self {
         let mut tree = LedgerTree::<T, M>::new();
@@ -877,10 +886,10 @@ where
         tree.next_surf_id    = value.next_surf_id;
         tree.next_matsurf_id = value.next_matsurf_id;
         tree.next_light_id   = value.next_light_id;
-        tree.next_seq_no     = value.next_seq_id;
+        tree.next_seq_no     = AtomicU32::new(value.next_seq_id);
 
         // Rebuild root
-        tree.root = LedgerNode::<T, M>::root();
+        tree.root = LedgerNode::<T, M>::root(&tree.next_seq_no);
 
         let mut stack = Vec::new();
 
