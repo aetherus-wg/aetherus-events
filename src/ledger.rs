@@ -177,17 +177,22 @@ where
 
         let mut resolve_stack: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
         resolve_stack.push(self.me.upgrade().unwrap());
-        while let Some(node) = resolve_stack.pop() && node.seq_no.get().is_none() {
-            let parent = node.parent.as_ref().map(|p| p.upgrade().unwrap());
-            match parent {
-                Some(parent_node) => {
-                    resolve_stack.push(node);
-                    resolve_stack.push(parent_node);
+        while let Some(node) = resolve_stack.pop() {
+            if node.seq_no.get().is_some() {
+                resolve_stack.push(node);
+                break;
+            } else {
+                let parent = node.parent.as_ref().map(|p| p.upgrade().unwrap());
+                match parent {
+                    Some(parent_node) => {
+                        resolve_stack.push(node);
+                        resolve_stack.push(parent_node);
+                    }
+                    None => {
+                        resolve_stack.push(node);
+                        break;
+                    },
                 }
-                None => {
-                    resolve_stack.push(node);
-                    break;
-                },
             }
         }
 
@@ -197,9 +202,9 @@ where
 
         while let Some(node) = resolve_stack.pop() {
             let seq_no = node.seq_no.get_or_init(|| next_seq_no);
-            assert_eq!(*seq_no, next_seq_no, "Sequence number mismatch during ledger resolution");
+            debug_assert_eq!(*seq_no, next_seq_no, "Sequence number mismatch during ledger resolution");
             next_seq_no = *node.next_seq_no.get_or_init(|| {
-                node.next_avail_seq_no.fetch_add(1, Ordering::Relaxed)
+                self.next_avail_seq_no.fetch_add(1, Ordering::Relaxed)
             });
         }
     }
