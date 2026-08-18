@@ -1,6 +1,6 @@
 [package]
 name = "events-ledger"
-version = "0.3.14"
+version = "0.3.15"
 authors = ["Cristian Bourceanu <v.c.bourceanu@smd.ed.ac.uk>"]
 edition = "2024"
 description = "Events Ledger keeping track of all events for photon interactions or signal mutations/processes"

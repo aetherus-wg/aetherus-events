@@ -41,7 +41,7 @@ use log::{error, warn};
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
-use std::collections::{HashMap, HashSet, BTreeMap};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::BufWriter;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak, OnceLock};
@@ -76,7 +76,6 @@ pub enum SrcName {
 
 #[derive(Debug)]
 pub struct LedgerNode<T, M> {
-    me:          Weak<LedgerNode<T, M>>,
     parent:      Option<Weak<LedgerNode<T, M>>>,
     // Uid = {seq_no, event}
     seq_no:      OnceLock<u32>,
@@ -97,8 +96,7 @@ where
     M: EventMap<T, Arc<LedgerNode<T, M>>>,
 {
     pub fn root(next_avail_seq_no: &Arc<AtomicU32>) -> Arc<Self> {
-        Arc::new_cyclic(|me| Self {
-            me:          me.clone(),
+        Arc::new(Self {
             seq_no:      OnceLock::new(),
             next_seq_no: OnceLock::new(),
             next_avail_seq_no: next_avail_seq_no.clone(),
@@ -110,8 +108,7 @@ where
 
     pub fn from_parent(parent: &Arc<Self>, event: T) -> Arc<Self> {
         let seq_no = parent.next_seq_no.clone();
-        Arc::new_cyclic(|me| Self {
-            me: me.clone(),
+        Arc::new(Self {
             seq_no,
             next_seq_no: OnceLock::new(),
             next_avail_seq_no: parent.next_avail_seq_no.clone(),
@@ -122,12 +119,12 @@ where
     }
 
     #[must_use]
-    pub fn new_children(&self, event: T) -> Arc<Self> {
+    pub fn new_children(self: &Arc<Self>, event: T) -> Arc<Self> {
         self.children
             .write()
             .insert_with(
                 event.clone(),
-                || Self::from_parent(&self.me.upgrade().unwrap(), event.clone())
+                || Self::from_parent(self, event)
             )
     }
 
@@ -162,7 +159,7 @@ where
     }
 
     #[must_use]
-    pub fn insert(&self, event: impl Into<T>) -> Arc<Self> {
+    pub fn insert(self: &Arc<Self>, event: impl Into<T>) -> Arc<Self> {
         let raw_event = event.into();
         if let Some(next) = self.children.read().get(&raw_event) {
             next.clone()
@@ -173,14 +170,14 @@ where
 
     // WARN: This is meant to be called only from one thread at a time to avoid race conditions on
     // seq_no values
-    pub fn resolve(&self) {
+    pub fn resolve(self: &Arc<Self>) {
         if self.seq_no.get().is_some() {
             // Already resolved
             return;
         }
 
         let mut resolve_stack: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
-        resolve_stack.push(self.me.upgrade().unwrap());
+        resolve_stack.push(self.clone());
         while let Some(node) = resolve_stack.pop() {
             if node.seq_no.get().is_some() {
                 resolve_stack.push(node);
@@ -258,11 +255,11 @@ where
         }
     }
 
-    pub fn get_leaf_nodes(&self) -> Vec<Arc<Self>> {
+    pub fn get_leaf_nodes(self: &Arc<Self>) -> Vec<Arc<Self>> {
         let mut leaf_nodes = Vec::new();
 
         let mut stack_nodes = Vec::new();
-        stack_nodes.push(self.me.upgrade().unwrap());
+        stack_nodes.push(self.clone());
 
         while let Some(node) = stack_nodes.pop() {
             if node.children.read().is_empty() {
@@ -282,11 +279,11 @@ where
         leaf_nodes
     }
 
-    pub fn get_dangling_nodes(&self) -> Vec<Arc<Self>> {
+    pub fn get_dangling_nodes(self: &Arc<Self>) -> Vec<Arc<Self>> {
         let mut dangling_nodes = Vec::new();
 
         let mut stack_nodes = Vec::new();
-        stack_nodes.push(self.me.upgrade().unwrap());
+        stack_nodes.push(self.clone());
 
         while let Some(node) = stack_nodes.pop() {
             // A node is considered dangling if it a leaf node which is not referenced outside the tree.
@@ -308,9 +305,9 @@ where
         dangling_nodes
     }
 
-    pub fn count_events(&self) -> HashMap<T, usize> {
+    pub fn count_events(self: &Arc<Self>) -> HashMap<T, usize> {
         let mut counts: HashMap<T, usize> = HashMap::new();
-        let mut node = self.me.upgrade().unwrap();
+        let mut node = self.clone();
         while let Some(parent) = &node.parent {
             counts.entry(node.event.clone()).and_modify(|c| *c += 1).or_insert(1);
             node = parent.upgrade().unwrap();
@@ -336,8 +333,6 @@ where
 
     // This should be an EventType::Root
     root:     Arc<LedgerNode<T, M>>,
-    // WARN: This should hold a weak pointer in order to allow cleanup when tree is pruned
-    node_map: HashMap<Uid, Weak<LedgerNode<T, M>>>,
 
     // Attempts to keep track of when new elements have been added to the Ledger
     dirty: bool,
@@ -359,8 +354,7 @@ where
             T: RawEvent,
             M: EventMap<T, Arc<LedgerNode<T, M>>>,
         {
-            let new_node = Arc::new_cyclic(|me| LedgerNode {
-                me: me.clone(),
+            let new_node = Arc::new(LedgerNode {
                 parent,
                 seq_no: node.seq_no.clone(),
                 event: node.event.clone(),
@@ -385,7 +379,6 @@ where
         let root = clone_node(&self.root, None);
 
         // Rebuild node map
-        let mut node_map      = HashMap::new();
         let mut resolve_stack = Vec::new();
         let node = self.root.clone();
 
@@ -393,8 +386,7 @@ where
             resolve_stack.push(child.clone());
         }
         while let Some(node) = resolve_stack.pop() {
-            if let Some(uid) = node.uid() {
-                node_map.insert(uid, Arc::downgrade(&node));
+            if let Some(_) = node.seq_no.get() {
                 for child in node.children.read().values() {
                     resolve_stack.push(child.clone());
                 }
@@ -409,7 +401,6 @@ where
             next_matsurf_id: self.next_matsurf_id,
             next_light_id: self.next_light_id,
             root,
-            node_map,
             dirty: self.dirty,
             next_seq_no: AtomicU32::new(self.next_seq_no.load(Ordering::SeqCst)).into(),
         }
@@ -441,7 +432,6 @@ where
             next_matsurf_id: u16::MAX,
             next_light_id:   0,
             root:            LedgerNode::<T, M>::root(&next_seq_no),
-            node_map:        HashMap::new(),
             // TODO: How to reliably detect mutation?
             dirty:           false,
             next_seq_no,
@@ -662,8 +652,6 @@ where
                     set_seq_no, children_seq_no,
                     "Sequence number mismatch during ledger resolution, set vs expected"
                 );
-                self.node_map
-                    .insert(child.uid().unwrap(), Arc::downgrade(child));
                 resolve_stack.push(child.clone());
             }
         }
@@ -671,18 +659,30 @@ where
         self.dirty = false;
     }
 
-    pub fn get_next(&self, uid: &Uid) -> Vec<Uid> {
+    pub fn get_node(&self, uid: &Uid) -> Option<Arc<LedgerNode<T,M>>> {
         self.check_dirty();
-        let node = self
-            .node_map
-            .get(uid)
-            .unwrap_or_else(|| panic!("UID {} not found in ledger", uid));
-        let access_node = node.upgrade().unwrap();
-        let children_map = access_node.children.read();
-        children_map
-            .values()
-            .map(|node| node.uid().unwrap())
-            .collect()
+        let seq_no = uid.seq_id;
+        let event = uid.event.into();
+        let mut fifo = VecDeque::new();
+        fifo.push_back(self.root().clone());
+        while let Some(node) = fifo.pop_front() {
+            if node.next_seq_no.get() == Some(&seq_no) {
+                return node.children.read().get(&event).cloned();
+            }
+            for child in node.children.read().values() {
+                fifo.push_back(child.clone());
+            }
+        }
+        None
+    }
+
+    pub fn get_chain(&self, uid: &Uid) -> Vec<Uid> {
+        self.check_dirty();
+        if let Some(node) = self.get_node(uid) {
+            node.get_chain()
+        } else {
+            vec![]
+        }
     }
 
     pub fn get_src_dict(&self) -> HashMap<SrcName, SrcId> {
@@ -693,19 +693,6 @@ where
             }
         }
         src_dict
-    }
-
-    pub fn get_chain(&self, uid: &Uid) -> Vec<Uid> {
-        self.check_dirty();
-        if let Some(node) = self.node_map.get(uid) {
-            if let Some(node) = node.upgrade() {
-                node.get_chain()
-            } else {
-                panic!("UID {} not found in ledger", uid);
-            }
-        } else {
-            panic!("UID {} not found in ledger", uid);
-        }
     }
 
     pub fn emit_dot<'a, I>(&self, uids: I) -> String
@@ -767,23 +754,7 @@ where
 
     pub fn prune_node(&mut self, node: &Arc<LedgerNode<T, M>>) {
         self.check_dirty();
-        if let Some(uid) = node.uid() {
-            self.node_map.remove(&uid);
-        }
         node.prune();
-    }
-
-    pub fn prune_uid(&mut self, uid: &Uid) {
-        self.check_dirty();
-        if let Some(node) = self.node_map.get(uid) {
-            if let Some(node) = node.upgrade() {
-                self.prune_node(&node);
-            } else {
-                panic!("UID {} not found in ledger", uid);
-            }
-        } else {
-            panic!("UID {} not found in ledger", uid);
-        }
     }
 
     pub fn get_leaf_uids(&self) -> Vec<Uid> {
@@ -795,15 +766,6 @@ where
     pub fn get_leaf_nodes(&self) -> Vec<Arc<LedgerNode<T,M>>> {
         self.check_dirty();
         self.root.get_leaf_nodes()
-    }
-
-    pub fn get_node(&self, uid: &Uid) -> Option<Arc<LedgerNode<T, M>>> {
-        self.check_dirty();
-        if let Some(node) = self.node_map.get(uid) {
-            node.upgrade()
-        } else {
-            None
-        }
     }
 
     pub fn get_dangling_nodes(&self) -> Vec<Arc<LedgerNode<T, M>>> {
@@ -829,10 +791,6 @@ where
         found_uids
     }
 
-    pub fn uids_count(&self) -> usize {
-        self.node_map.len()
-    }
-
     pub fn count_events(&self) -> HashMap<T, HashMap<Uid, usize>> {
         let mut counts = HashMap::new();
         let leaf_nodes = self.root.get_leaf_nodes();
@@ -853,8 +811,41 @@ where
     M: EventMap<T, Arc<LedgerNode<T, M>>>,
     T: RawEvent,
 {
+    // NOTE: difference to from reference is cleaning up the nodes as we use them
     fn from(tree: LedgerTree<T, M>) -> Self {
-        Self::from(&tree)
+        let mut ledger = Ledger::new();
+
+        ledger.grps            = tree.grps.clone();
+        ledger.src_map         = tree.src_map.clone();
+        ledger.next_mat_id     = tree.next_mat_id;
+        ledger.next_surf_id    = tree.next_surf_id;
+        ledger.next_matsurf_id = tree.next_matsurf_id;
+        ledger.next_light_id   = tree.next_light_id;
+        ledger.next_seq_id     = tree.next_seq_no.load(Ordering::SeqCst);
+
+        // Traverse the resolved tree and reconstruct next / prev maps.
+        // We do a DFS from the root.
+        let mut stack = vec![];
+        for child in tree.root.children.read().values() {
+            ledger.insert_start(child.uid().unwrap());
+            stack.push((child.uid().unwrap(), child.clone()));
+        }
+
+        while let Some((prev_uid, node)) = stack.pop() {
+            for child in node.children.read().values() {
+                ledger.insert(
+                    prev_uid,
+                    child.uid().unwrap(),
+                    *child.next_seq_no.get().unwrap(),
+                );
+                stack.push((child.uid().unwrap(), child.clone()));
+            }
+            if node.children.read().is_empty() {
+                node.prune();
+            }
+        }
+
+        ledger
     }
 }
 
@@ -931,8 +922,6 @@ where
 
         for &uid in value.start_events().iter() {
             let node = tree.root.new_children(uid.event.into());
-            tree.node_map.insert(uid, Arc::downgrade(&node));
-
             stack.push((uid, node.clone()));
         }
 
@@ -943,8 +932,6 @@ where
 
             for uid in value.get_next(&prev_uid) {
                 let new_node = parent_node.new_children(uid.event.into());
-                tree.node_map.insert(uid, Arc::downgrade(&new_node));
-
                 stack.push((uid, new_node.clone()));
             }
         }
@@ -1239,7 +1226,7 @@ mod tests {
         assert_eq!(uid3.seq_id, 2);
 
         // Check the chain
-        let chain = ledger.get_chain(&uid3);
+        let chain = node3.get_chain();
         println!("Chain: {:?}", chain);
         println!(
             "Chain: {:?}",
@@ -1364,18 +1351,13 @@ mod tests {
         assert_eq!(uid2.seq_id, 1);
         assert_eq!(uid3.seq_id, 2);
 
-        let chain = ledger_tree.get_chain(&uid3);
-        println!(
-            "Chain: {:?}",
-            chain
-                .iter()
-                .map(|uid| format!(
-                    "Uid(seq_id: {}, event: {:?})",
-                    uid.seq_id,
-                    uid.event.decode().event_type
-                ))
-                .collect::<Vec<String>>()
-        );
+        node3.get_chain().iter().for_each(|uid| {
+            println!(
+            "Uid(seq_id: {}, event: {:?})",
+            uid.seq_id,
+            uid.event.decode().event_type
+            );
+        });
 
         let ledger: Ledger = ledger_tree.into();
 
@@ -1498,61 +1480,6 @@ mod tests {
             result.len(), 1,
             "Expected exactly one leaf node UID in a simple chain"
         );
-    }
-
-    #[test]
-    fn test_prune_until_bifurcation_uids() {
-        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
-
-        // Populate ledger with non-dangling UIDs
-        let node_0     = ledger_tree.root()
-            .insert(EventId::new_emission(Emission::PencilBeam, SrcId::Light(0)));
-        let node_1     = node_0
-            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
-
-        let node_21    = node_1
-            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
-        let node_22    = node_21
-            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
-        let _node_231  = node_22
-            .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
-        let node_232   = node_22
-            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
-        let _node_2321 = node_232
-            .insert(EventId::new_mcrt(mcrt_event!(Interface, Boundary), SrcId::Surf(0)));
-
-        let node_31    = node_1
-            .insert(EventId::new_mcrt(mcrt_event!(Material, Elastic, Mie, Unknown), SrcId::Mat(0)));
-        let _node_32   = node_31
-            .insert(EventId::new(EventType::Detection, SrcId::Surf(1)));
-
-        ledger_tree.resolve();
-
-        let dangling_uids = ledger_tree.get_leaf_uids();
-        assert_eq!(dangling_uids.len(), 3, "Expected dangling UIDs");
-        let dangling_lost_uids = dangling_uids
-            .into_iter()
-            .filter(|uid| {
-                BitsProperty::NoMatch(pattern!(Detection, SrcId::Surf(1))).matches(uid.event)
-            })
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            dangling_lost_uids.len(),
-            2,
-            "Expected dangling UID to be pruned"
-        );
-
-        //println!("{:?}", ledger);
-
-        for uid in dangling_lost_uids.iter() {
-            println!("Pruning UID: {:?}", uid);
-            ledger_tree.prune_uid(uid);
-        }
-
-        for uid in dangling_lost_uids.iter() {
-            assert!(ledger_tree.get_node(uid).is_none());
-        }
     }
 
     #[test]

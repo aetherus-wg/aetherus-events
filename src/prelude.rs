@@ -4,7 +4,7 @@ pub use crate::mcrt_event;
 pub use crate::src::SrcId;
 pub use crate::uid::Uid;
 
-pub const MAP_SIZE: usize = 4;
+pub const MAP_SIZE: usize = 2;
 
 use crate::ledger::{
     LedgerTree as GenericLedgerTree,

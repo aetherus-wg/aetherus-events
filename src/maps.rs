@@ -38,15 +38,14 @@ where
     // This is a simple implementation of a map that allows for efficient lookups and insertions
     // when the size of the map is quite small
     #[allow(clippy::type_complexity)]
-    items: SmallVec<[(K, Arc<LedgerNode<K, SmallMap<K, N>>>); N]>,
+    items: SmallVec<[Arc<LedgerNode<K, SmallMap<K, N>>>; N]>,
 }
 
 impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>>
     for SmallMap<K, N>
 {
     type Item = Arc<LedgerNode<K, SmallMap<K, N>>>;
-    type Values<'a>
-        = Map<slice::Iter<'a, (K, Self::Item)>, fn(&(K, Self::Item)) -> &Self::Item>
+    type Values<'a> = slice::Iter<'a, Self::Item>
     where
         K: 'a,
         Self::Item: 'a;
@@ -59,13 +58,13 @@ impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>
 
     fn get(&self, query: &K) -> Option<&Self::Item> {
         self.items
-            .binary_search_by(|(k, _)| k.cmp(query))
+            .binary_search_by(|node| node.event().cmp(query))
             .ok()
-            .map(|idx| &self.items[idx].1)
+            .map(|idx| &self.items[idx])
     }
 
     fn values(&self) -> Self::Values<'_> {
-        self.items.iter().map(|(_k, v)| v)
+        self.items.iter()
     }
 
     fn insert(&mut self, k: K, v: Self::Item) -> Self::Item {
@@ -76,23 +75,28 @@ impl<K: RawEvent, const N: usize> EventMap<K, Arc<LedgerNode<K, SmallMap<K, N>>>
     where
         F: FnOnce() -> Self::Item,
     {
-        match self.items.binary_search_by(|(key, _)| key.cmp(&k)) {
-            Ok(idx) => {
-                self.items[idx].1.clone()
-            }
-            Err(idx) => {
-                let v = f();
-                self.items.insert(idx, (k, v.clone())); // keep sorted
-                v
+         match self
+            .items
+            .binary_search_by(|node| node.event().cmp(&k))
+        {
+            Ok(index) => Arc::clone(&self.items[index]),
+            Err(index) => {
+                let value = f();
+
+                // Required because the key is represented by the node's event.
+                debug_assert!(value.event() == &k);
+
+                self.items.insert(index, Arc::clone(&value));
+                value
             }
         }
     }
 
     fn remove(&mut self, query: &K) -> Option<Self::Item> {
         self.items
-            .binary_search_by(|(k, _)| k.cmp(query))
+            .binary_search_by(|node| node.event().cmp(query))
             .ok()
-            .map(|idx| self.items.remove(idx).1)
+            .map(|index| self.items.remove(index))
     }
 
     fn clear(&mut self) {
