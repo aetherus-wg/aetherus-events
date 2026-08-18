@@ -18,6 +18,7 @@ hashbrown = "0.17.0"
 log = "^0.4.*"
 num_enum = "^0.7.*"
 parking_lot = { version = "0.12.5", features = ["hardware-lock-elision"] }
+rayon = "^1.10.0"
 serde = { version = "1.0.*", features = ["derive"] }
 serde_json = "1.0.145"
 serde_with = { version = "3.16.1", features = ["json"] }

@@ -501,7 +501,7 @@ mod tests {
 
         let bits_property = BitsProperty::NoMatch(BitsMatch::new(0xFFFFFFFF, *node.event()));
 
-        let result = ledger.get_not_matching_uids(bits_property);
+        let result = ledger.get_matching_uids(bits_property);
         assert_eq!(result.len(), 0, "Expected no dangling UIDs");
     }
 
@@ -519,7 +519,7 @@ mod tests {
 
         let bits_property = BitsProperty::Match(BitsMatch::new(0xFFFFFFFF, *node.event()));
 
-        let result = ledger.get_not_matching_uids(bits_property);
+        let result = ledger.get_matching_uids(bits_property);
         assert_eq!(result.len(), 1, "Expected exactly one dangling UIDs");
     }
 }

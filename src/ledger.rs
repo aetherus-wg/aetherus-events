@@ -46,6 +46,7 @@ use std::io::BufWriter;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak, OnceLock};
 use parking_lot::RwLock;
+use rayon::prelude::*;
 
 use crate::filter::BitsProperty;
 use crate::maps::EventMap;
@@ -86,6 +87,9 @@ pub struct LedgerNode<T, M> {
     next_avail_seq_no: Arc<AtomicU32>,
     children:    RwLock<M>,
 }
+
+unsafe impl<T, M> Send for LedgerNode<T, M> {}
+unsafe impl<T, M> Sync for LedgerNode<T, M> {}
 
 impl<T, M> LedgerNode<T, M>
 where
@@ -806,17 +810,15 @@ where
         self.root.get_dangling_nodes()
     }
 
-    pub fn get_not_matching_nodes(&self, bits_property: BitsProperty) -> Vec<Arc<LedgerNode<T, M>>> {
-        let mut found_nodes: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
-        for end_node in self.root.get_leaf_nodes() {
-            if bits_property.matches(end_node.event.clone().into()) {
-                found_nodes.push(end_node);
-            }
-        }
-        found_nodes
+    pub fn get_matching_nodes(&self, bits_property: BitsProperty) -> Vec<Arc<LedgerNode<T, M>>> {
+        self.root.get_leaf_nodes().par_iter().filter(|node|
+                bits_property.matches(node.event.clone().into())
+            )
+            .cloned()
+            .collect()
     }
 
-    pub fn get_not_matching_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
+    pub fn get_matching_uids(&self, bits_property: BitsProperty) -> Vec<Uid> {
         let mut found_uids: Vec<Uid> = Vec::new();
         for end_node in self.root.get_leaf_nodes() {
             let uid = end_node.uid().unwrap();
