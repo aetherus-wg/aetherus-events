@@ -43,6 +43,7 @@ use serde_with::{DeserializeAs, SerializeAs};
 use serde_with::{DisplayFromStr, serde_as};
 use std::collections::{HashMap, HashSet, BTreeMap};
 use std::io::BufWriter;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak, OnceLock};
 use parking_lot::RwLock;
 
@@ -80,6 +81,9 @@ pub struct LedgerNode<T, M> {
     seq_no:      OnceLock<u32>,
     event:       T,
     next_seq_no: OnceLock<u32>,
+    // FIXME: It should be possible to just use a reference to atomic, but have problems with
+    // constructing it
+    next_avail_seq_no: Arc<AtomicU32>,
     children:    RwLock<M>,
 }
 
@@ -88,11 +92,12 @@ where
     T: RawEvent,
     M: EventMap<T, Arc<LedgerNode<T, M>>>,
 {
-    pub fn root() -> Arc<Self> {
+    pub fn root(next_avail_seq_no: &Arc<AtomicU32>) -> Arc<Self> {
         Arc::new_cyclic(|me| Self {
             me:          me.clone(),
             seq_no:      OnceLock::new(),
-            next_seq_no: 0.into(),
+            next_seq_no: OnceLock::new(),
+            next_avail_seq_no: next_avail_seq_no.clone(),
             event:       T::default(),
             parent:      None,
             children:    RwLock::new(M::new()),
@@ -105,6 +110,7 @@ where
             me: me.clone(),
             seq_no,
             next_seq_no: OnceLock::new(),
+            next_avail_seq_no: parent.next_avail_seq_no.clone(),
             event,
             parent: Some(Arc::downgrade(parent)),
             children: RwLock::new(M::new()),
@@ -158,6 +164,43 @@ where
             next.clone()
         } else {
             self.new_children(raw_event)
+        }
+    }
+
+    // WARN: This is meant to be called only from one thread at a time to avoid race conditions on
+    // seq_no values
+    pub fn resolve(&self) {
+        if self.seq_no.get().is_some() {
+            // Already resolved
+            return;
+        }
+
+        let mut resolve_stack: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
+        resolve_stack.push(self.me.upgrade().unwrap());
+        while let Some(node) = resolve_stack.pop() && node.seq_no.get().is_none() {
+            let parent = node.parent.as_ref().map(|p| p.upgrade().unwrap());
+            match parent {
+                Some(parent_node) => {
+                    resolve_stack.push(node);
+                    resolve_stack.push(parent_node);
+                }
+                None => {
+                    resolve_stack.push(node);
+                    break;
+                },
+            }
+        }
+
+        let mut next_seq_no = *resolve_stack.pop().unwrap().next_seq_no.get_or_init(|| {
+            self.next_avail_seq_no.fetch_add(1, Ordering::Relaxed)
+        });
+
+        while let Some(node) = resolve_stack.pop() {
+            let seq_no = node.seq_no.get_or_init(|| next_seq_no);
+            assert_eq!(*seq_no, next_seq_no, "Sequence number mismatch during ledger resolution");
+            next_seq_no = *node.next_seq_no.get_or_init(|| {
+                node.next_avail_seq_no.fetch_add(1, Ordering::Relaxed)
+            });
         }
     }
 
@@ -215,7 +258,7 @@ where
         while let Some(node) = stack_nodes.pop() {
             if node.children.read().is_empty() {
                 // Check that this is not the root node
-                if node.next_seq_no.get() != Some(&0) {
+                if node.parent.is_some() {
                     leaf_nodes.push(node);
                 }
             } else {
@@ -280,7 +323,7 @@ where
     next_matsurf_id: u16,
     next_light_id:   u16,
 
-    next_seq_no: u32,
+    next_seq_no:     Arc<AtomicU32>,
 
     // This should be an EventType::Root
     root:     Arc<LedgerNode<T, M>>,
@@ -313,6 +356,7 @@ where
                 seq_no: node.seq_no.clone(),
                 event: node.event.clone(),
                 next_seq_no: node.next_seq_no.clone(),
+                next_avail_seq_no: node.next_avail_seq_no.clone(),
                 children: RwLock::new(M::new()),
             });
 
@@ -358,7 +402,7 @@ where
             root,
             node_map,
             dirty: self.dirty,
-            next_seq_no: self.next_seq_no,
+            next_seq_no: AtomicU32::new(self.next_seq_no.load(Ordering::SeqCst)).into(),
         }
     }
 }
@@ -379,6 +423,7 @@ where
     M: EventMap<T, Arc<LedgerNode<T, M>>>,
 {
     pub fn new() -> Self {
+        let next_seq_no = Arc::new(AtomicU32::new(0));
         Self {
             grps:            HashMap::new(),
             src_map:         HashMap::new(),
@@ -386,11 +431,11 @@ where
             next_surf_id:    0,
             next_matsurf_id: u16::MAX,
             next_light_id:   0,
-            root:            LedgerNode::<T, M>::root(),
+            root:            LedgerNode::<T, M>::root(&next_seq_no),
             node_map:        HashMap::new(),
             // TODO: How to reliably detect mutation?
             dirty:           false,
-            next_seq_no:     1,
+            next_seq_no,
         }
     }
     pub fn root(&self) -> &Arc<LedgerNode<T, M>> {
@@ -594,31 +639,23 @@ where
     }
 
     pub fn resolve(&mut self) {
-        let mut resolve_stack: Vec<(Arc<LedgerNode<T, M>>, u32)> = Vec::new();
-        let node = self.root.clone();
+        let mut resolve_stack: Vec<Arc<LedgerNode<T, M>>> = Vec::new();
+        resolve_stack.push(self.root.clone());
 
-        for child in node.children.read().values() {
-            resolve_stack.push((child.clone(), *node.next_seq_no.get_or_init(|| 0)));
-        }
-
-        while let Some((node, seq_no)) = resolve_stack.pop() {
-            let set_seq_no = *node.seq_no.get_or_init(|| seq_no);
-            assert_eq!(
-                set_seq_no, seq_no,
-                "Sequence number mismatch during ledger resolution, set vs expected"
-            );
-
-            let next_seq_no = *node.next_seq_no.get_or_init(|| {
-                let seq_no = self.next_seq_no;
-                self.next_seq_no += 1;
-                seq_no
+        while let Some(node) = resolve_stack.pop() {
+            let children_seq_no = node.next_seq_no.get_or_init(|| {
+                self.next_seq_no.fetch_add(1, Ordering::SeqCst)
             });
 
-            self.node_map
-                .insert(node.uid().unwrap(), Arc::downgrade(&node));
-
             for child in node.children.read().values() {
-                resolve_stack.push((child.clone(), next_seq_no));
+                let set_seq_no = child.seq_no.get_or_init(|| *children_seq_no);
+                debug_assert_eq!(
+                    set_seq_no, children_seq_no,
+                    "Sequence number mismatch during ledger resolution, set vs expected"
+                );
+                self.node_map
+                    .insert(child.uid().unwrap(), Arc::downgrade(child));
+                resolve_stack.push(child.clone());
             }
         }
 
@@ -828,7 +865,7 @@ where
         ledger.next_surf_id    = tree.next_surf_id;
         ledger.next_matsurf_id = tree.next_matsurf_id;
         ledger.next_light_id   = tree.next_light_id;
-        ledger.next_seq_id     = tree.next_seq_no;
+        ledger.next_seq_id     = tree.next_seq_no.load(Ordering::SeqCst);
 
         // Traverse the resolved tree and reconstruct next / prev maps.
         // We do a DFS from the root.
@@ -877,10 +914,11 @@ where
         tree.next_surf_id    = value.next_surf_id;
         tree.next_matsurf_id = value.next_matsurf_id;
         tree.next_light_id   = value.next_light_id;
-        tree.next_seq_no     = value.next_seq_id;
+        tree.next_seq_no     = AtomicU32::new(value.next_seq_id).into();
 
         // Rebuild root
-        tree.root = LedgerNode::<T, M>::root();
+        tree.root = LedgerNode::<T, M>::root(&tree.next_seq_no);
+        tree.root.next_seq_no.set(0).unwrap();
 
         let mut stack = Vec::new();
 
@@ -1242,6 +1280,44 @@ mod tests {
 
         let ledger_tree_read: LedgerTree<u32, SmallMap<u32, 8>> = (&ledger).into();
         let ledger_clone: Ledger = ledger_tree_read.into();
+
+        assert_eq!(ledger.grps,         ledger_clone.grps);
+        assert_eq!(ledger.src_map,      ledger_clone.src_map);
+        assert_eq!(ledger.start_events, ledger_clone.start_events);
+        assert_eq!(ledger.next,         ledger_clone.next);
+        assert_eq!(ledger.prev,         ledger_clone.prev);
+    }
+
+    #[test]
+    fn ledger_vs_node_resolve() {
+        let mut ledger_tree = LedgerTree::<u32, SmallMap<u32, 8>>::new();
+        let surf_src_id = ledger_tree.with_surf("surface1".to_string(), Some("group1".to_string()));
+        let mat_src_id = ledger_tree.with_mat("material1".to_string());
+        let emission_event = EventId {
+            event_type: EventType::Emission(Emission::PointSource),
+            src_id:     SrcId::Light(1),
+        };
+        let node1 = ledger_tree.root().insert(emission_event);
+
+        let mcrt_event = EventId {
+            event_type: EventType::MCRT(mcrt_event!(Interface, Refraction)),
+            src_id:     surf_src_id,
+        };
+        let node2 = node1.insert(mcrt_event);
+
+        let mcrt_event = EventId {
+            event_type: EventType::MCRT(mcrt_event!(Material, Elastic, Mie, Forward)),
+            src_id:     mat_src_id,
+        };
+        let node3 = node2.insert(mcrt_event);
+
+        node3.resolve();
+
+        let mut ledger_tree_clone = ledger_tree.clone();
+        ledger_tree_clone.resolve();
+
+        let ledger: Ledger = ledger_tree.into();
+        let ledger_clone: Ledger = ledger_tree_clone.into();
 
         assert_eq!(ledger.grps,         ledger_clone.grps);
         assert_eq!(ledger.src_map,      ledger_clone.src_map);
